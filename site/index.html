@@ -173,7 +173,7 @@ footer{border-top:1px solid var(--line);padding:48px 0 34px}
       <a class="nav-t btn2" href="#node"><span data-i18n="nav.node">Live node</span></a>
       <a class="nav-t btn2" href="#arch"><span data-i18n="nav.arch">Architecture</span></a>
       <a class="nav-t btn2" href="#faq"><span data-i18n="nav.faq">FAQ</span></a>
-      <a class="cta" href="#start"><span data-i18n="nav.code">Get the code</span></a>
+      <a class="cta" href="https://github.com/MeshLLM-P2P/ai-compute-mesh"><span data-i18n="nav.code">Get the code</span></a>
       <button id="theme-toggle" type="button" aria-label="Toggle theme">☀ Light</button>
       <select id="lang-select" class="lang-select" title="Language">
         <option value="en">EN</option>
@@ -369,7 +369,7 @@ footer{border-top:1px solid var(--line);padding:48px 0 34px}
       </div>
       <div class="term-body">
         <pre>
-<span class="t-prompt">$</span> git clone https://github.com/<span class="t-in">you</span>/ai-compute-mesh
+<span class="t-prompt">$</span> git clone https://github.com/MeshLLM-P2P/ai-compute-mesh
 <span class="t-prompt">$</span> cd ai-compute-mesh && npm install
 <span class="t-prompt">$</span> MESH_HOST=0.0.0.0 MESH_PORT=4011 MESH_SETTLE_MODE=sim node server/src/index.js
 <span class="t-out"><span class="ok">[meshllm] server on https://0.0.0.0:4011 (settleMode=sim, tls=self-signed)</span></span>
@@ -381,7 +381,7 @@ footer{border-top:1px solid var(--line);padding:48px 0 34px}
       <h2 class="h2" style="text-align:center" data-i18n="start.cta.h2">Run your own node.</h2>
       <p class="sub" data-i18n="start.cta.sub">The first public node is live. Add yours to the mesh in three commands — and connect any consumer (WorkBuddy, your own agent, or the OpenAI-bridge) to it.</p>
       <div style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap">
-        <a class="btn primary" href="#"><span data-i18n="start.btn1">Clone on GitHub</span></a>
+        <a class="btn primary" href="https://github.com/MeshLLM-P2P/ai-compute-mesh"><span data-i18n="start.btn1">Clone on GitHub</span></a>
         <a class="btn ghost" href="#tech"><span data-i18n="start.btn2">Read the architecture</span></a>
       </div>
     </div>
@@ -412,8 +412,8 @@ footer{border-top:1px solid var(--line);padding:48px 0 34px}
         <p data-i18n="foot.brand">Open peer-to-peer AI compute sharing. Encrypted data plane, USDT escrow settlement, and a directory on its way to the DHT.</p>
       </div>
       <div class="foot-col"><h4 data-i18n="foot.h1">Product</h4><ul><li><a href="#how"><span data-i18n="foot.l1">How it works</span></a></li><li><a href="#arch"><span data-i18n="foot.l2">Architecture</span></a></li><li><a href="#node"><span data-i18n="foot.l3">Live node</span></a></li><li><a href="#tech"><span data-i18n="foot.l4">Stack</span></a></li></ul></div>
-      <div class="foot-col"><h4 data-i18n="foot.h2">Node</h4><ul><li><a href="#node" style="color:var(--accent);font-weight:700">● 68.64.183.89:4011</a></li><li><a href="#start"><span data-i18n="foot.l5">Deploy yours</span></a></li><li><a href="#faq"><span data-i18n="foot.l6">FAQ</span></a></li></ul></div>
-      <div class="foot-col"><h4 data-i18n="foot.h3">Endpoints</h4><ul><li><a href="#" style="font-family:var(--mono);font-size:.85rem">/health</a></li><li><a href="#" style="font-family:var(--mono);font-size:.85rem">/config</a></li><li><a href="#" style="font-family:var(--mono);font-size:.85rem">/listings</a></li><li><a href="#" style="font-family:var(--mono);font-size:.85rem">/dc (WSS)</a></li></ul></div>
+      <div class="foot-col"><h4 data-i18n="foot.proj">Project</h4><ul><li><a href="#node" style="color:var(--accent);font-weight:700;font-family:var(--mono);font-size:.9rem">● 68.64.183.89:4011</a></li><li><a href="https://mesh.tlvip.uk"><span data-i18n="foot.website">Official website</span></a></li><li><a href="https://github.com/MeshLLM-P2P/ai-compute-mesh"><span data-i18n="foot.code">Source code (GitHub)</span></a></li><li><a href="#faq"><span data-i18n="foot.l6">FAQ</span></a></li></ul></div>
+      <div class="foot-col"><h4 data-i18n="foot.h3">Endpoints</h4><ul><li><a href="#node" style="font-family:var(--mono);font-size:.85rem">/health</a></li><li><a href="#node" style="font-family:var(--mono);font-size:.85rem">/config</a></li><li><a href="#node" style="font-family:var(--mono);font-size:.85rem">/listings</a></li><li><a href="#node" style="font-family:var(--mono);font-size:.85rem">/dc (WSS)</a></li></ul></div>
     </div>
     <div class="foot-bottom">
       <span>© <span id="year"></span> MeshLLM <span data-i18n="foot.oss">— open source.</span></span>
@@ -455,7 +455,7 @@ var LANGS={
   "faq.q3":"Do I need a wallet to consume?","faq.a3.1":"Yes — an Ed25519 wallet. In","faq.a3.2":" mode a wallet with no prior balance is automatically credited 100 USDT on first verified login, so you can try the mesh for free. In","faq.a3.3":"/mainnet you deposit real USDT into the escrow.",
   "faq.q4":"How do providers get paid?","faq.a4":"Per call, tokens are counted against the consumer's lock and settled to the provider after the transcript-hash check passes. Pricing is per 1k input/output tokens in micro-USDT, with a minimum fee and a bond; the provider's declared tolerance (default ±5%) bounds metering.",
   "faq.q5":"Is the network really decentralised yet?","faq.a5":"The data plane already is (P2P + E2EE, no central decryption). The control plane is lightweight-centred today — one Express node doing directory + signalling + escrow. The v2 roadmap replaces it with libp2p DHT + relays + on-chain escrow, so the central process shrinks to a single seed node.",
-  "foot.brand":"Open peer-to-peer AI compute sharing. Encrypted data plane, USDT escrow settlement, and a directory on its way to the DHT.","foot.h1":"Product","foot.l1":"How it works","foot.l2":"Architecture","foot.l3":"Live node","foot.l4":"Stack","foot.h2":"Node","foot.l5":"Deploy yours","foot.l6":"FAQ","foot.h3":"Endpoints","foot.oss":"— open source.","foot.sim":"· First public node online",
+  "foot.brand":"Open peer-to-peer AI compute sharing. Encrypted data plane, USDT escrow settlement, and a directory on its way to the DHT.","foot.h1":"Product","foot.l1":"How it works","foot.l2":"Architecture","foot.l3":"Live node","foot.l4":"Stack","foot.h2":"Node","foot.l5":"Deploy yours","foot.l6":"FAQ","foot.h3":"Endpoints","foot.oss":"— open source.","foot.sim":"· First public node online","foot.proj":"Project","foot.website":"Official website","foot.code":"Source code (GitHub)",
   "pinging":"pinging…","status.on":"node online · ","status.s":"listing(s)","status.off":"unreachable","status.failed":"failed",
   "toast.on":"Node online · ","toast.s":"listing(s)","toast.off":"Node unreachable: ",
   "list.found":"→ found ","list.s":"listing(s)","list.none":"→ no listings yet (add a provider)"
@@ -491,7 +491,7 @@ var LANGS={
   "faq.q3":"消费需要钱包吗？","faq.a3.1":"是的 —— 一个 Ed25519 钱包。在","faq.a3.2":"模式，一个无历史余额的钱包会在首次验证登录后自动入账 100 USDT，让你免费试用 mesh。在","faq.a3.3":"（主网）你存入真实的 USDT 到托管中。",
   "faq.q4":"提供方如何获得支付？","faq.a4":"每次调用，token 按消费方的锁来计量，并在对话哈希检查通过后结算给提供方。定价按每千输入/输出 token 计微-USDT，含最低费用和保证金；提供方声明的容差（默认 ±5%）限定计量。",
   "faq.q5":"网络现在真的去中心化了？","faq.a5":"数据平面已经是（P2P + E2EE，无中心解密）。控制平面今天是轻量中心化的 —— 一个 Express 节点做目录 + 信令 + 托管。v2 路线图用 libp2p DHT + 中继 + 链上托管取代它，使中心进程缩小为一个种子节点。",
-  "foot.brand":"开放点对点 AI 算力共享。加密数据平面、USDT 托管结算，以及一个正迈向 DHT 的目录。","foot.h1":"产品","foot.l1":"工作原理","foot.l2":"架构","foot.l3":"在线节点","foot.l4":"技术栈","foot.h2":"节点","foot.l5":"部署你的","foot.l6":"FAQ","foot.h3":"端点","foot.oss":"—— 开源。","foot.sim":"· 首个公共节点在线",
+  "foot.brand":"开放点对点 AI 算力共享。加密数据平面、USDT 托管结算，以及一个正迈向 DHT 的目录。","foot.h1":"产品","foot.l1":"工作原理","foot.l2":"架构","foot.l3":"在线节点","foot.l4":"技术栈","foot.h2":"节点","foot.l5":"部署你的","foot.l6":"FAQ","foot.h3":"端点","foot.oss":"—— 开源。","foot.sim":"· 首个公共节点在线","foot.proj":"项目","foot.website":"官方网站","foot.code":"源码（GitHub）",
   "pinging":"测试中…","status.on":"节点在线 · ","status.s":"个 listing","status.off":"无法连接","status.failed":"失败",
   "toast.on":"节点在线 · ","toast.s":"个 listing","toast.off":"无法连接节点: ",
   "list.found":"→ 找到 ","list.s":"个","list.none":"→ 暂无 listing（添加一个提供方）"
@@ -527,7 +527,7 @@ var LANGS={
   "faq.q3":"Faut-il un portefeuille pour consommer ?","faq.a3.1":"Oui — un portefeuille Ed25519. Dans","faq.a3.2":"mode, un portefeuille sans solde antérieur est crédité automatiquement 100 USDT au premier login vérifié, pour que vous puissiez tester le mesh gratuitement. Dans","faq.a3.3":" (mainnet) vous déposez des USDT réels dans l'escrow.",
   "faq.q4":"Comment les fournisseurs sont-ils payés ?","faq.a4":"Par appel, les tokens sont comptés contre le verrouillage du consommateur et settled au fournisseur après que la vérification de l'hachage de transcription passe. La tarification est par 1k tokens d'entrée/sortie en micro-USDT, avec une fee minimale et une caution ; la tolérance déclarée du fournisseur (défaut ±5%) borne le comptage.",
   "faq.q5":"Le réseau est-il vraiment décentralisé aujourd'hui ?","faq.a5":"Le plan de données l'est déjà (P2P + E2EE, pas de décodage central). Le plan de contrôle est aujourd'hui léger et centré — un nœud Express faisant annuaire + signalet + escrow. La roadmap v2 le remplace par Kademlia libp2p DHT + relais + escrow on-chain, pour que le processus central se réduise à un seul nœud de seed.",
-  "foot.brand":"Partage open pair à pair du calcul IA. Plan de données chiffré, settlement par escrow USDT, et un annuaire en voie vers la DHT.","foot.h1":"Produit","foot.l1":"Comment ça marche","foot.l2":"Architecture","foot.l3":"Nœud actif","foot.l4":"Tech","foot.h2":"Nœud","foot.l5":"Déployez le vôtre","foot.l6":"FAQ","foot.h3":"Endpoints","foot.oss":"— open source.","foot.sim":"· Premier nœud public en ligne",
+  "foot.brand":"Partage open pair à pair du calcul IA. Plan de données chiffré, settlement par escrow USDT, et un annuaire en voie vers la DHT.","foot.h1":"Produit","foot.l1":"Comment ça marche","foot.l2":"Architecture","foot.l3":"Nœud actif","foot.l4":"Tech","foot.h2":"Nœud","foot.l5":"Déployez le vôtre","foot.l6":"FAQ","foot.h3":"Endpoints","foot.oss":"— open source.","foot.sim":"· Premier nœud public en ligne","foot.proj":"Projet","foot.website":"Site officiel","foot.code":"Code source (GitHub)",
   "pinging":"test en cours…","status.on":"nœud en ligne · ","status.s":"annonce(s)","status.off":"indisponible","status.failed":"échec",
   "toast.on":"Nœud en ligne · ","toast.s":"annonce(s)","toast.off":"Nœud indisponible : ",
   "list.found":"→ ", "list.s":"annonce(s)", "list.none":"→ aucune annonce (ajoutez un fournisseur)"
