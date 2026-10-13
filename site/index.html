@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>MeshLLM — Open P2P AI Compute Mesh</title>
+<meta name="description" content="MeshLLM is a permissionless peer-to-peer AI compute sharing network. Providers lend GPUs, consumers book models, and every call settles atomically in USDT on Solana — all over an end-to-end encrypted data plane.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%2300e5ff'/><stop offset='1' stop-color='%236b21ff'/></linearGradient></defs><circle cx='32' cy='32' r='14' fill='%2300e5ff'/><circle cx='20' cy='48' r='6' fill='url(%23g)'/><circle cx='44' cy='48' r='6' fill='url(%23g)'/><circle cx='32' cy='48' r='6' fill='url(%23g)'/></svg>">
+<style>
+:root{
+  --bg:#0b0e17; --bg-soft:#111527; --panel:#161c2e; --panel-2:#1b2338;
+  --text:#e7ecf7; --muted:#97a3bd; --dim:#6f7a99;
+  --line:rgba(120,140,200,.18); --line-soft:rgba(120,140,200,.10);
+  --accent:#00e5ff; --accent-2:#6b21ff; --accent-3:#ff3b6b;
+  --good:#28c76e; --warn:#f5b80d; --bad:#ff5c6b;
+  --glow:0 0 24px rgba(0,229,255,.25);
+  --radius:14px; --radius-sm:9px; --max:1240px;
+  --font:'Inter','Segoe UI',system-ui,-apple-system,'Helvetica Neue',sans-serif;
+  --mono:'Cascadia Code','SF Mono','JetBrains Mono',ui-monospace,Menlo,monospace;
+  --shadow:0 18px 40px -18px rgba(0,0,0,.6);
+}
+[data-theme="light"]{
+  --bg:#f3f6ff; --bg-soft:#e9edf9; --panel:#ffffff; --panel-2:#f0f4ff;
+  --text:#12182b; --muted:#5b6585; --dim:#93a0c0;
+  --line:rgba(40,60,110,.16); --line-soft:rgba(40,60,110,.08);
+  --glow:0 0 24px rgba(0,229,255,.35);
+  --shadow:0 18px 40px -18px rgba(20,40,90,.28);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased;font-size:16.5px;overflow-x:hidden}
+::selection{background:rgba(0,229,255,.22);color:#fff}
+a{color:inherit}a:hover{text-decoration:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+img{max-width:100%;display:block}
+.container{max-width:var(--max);margin:0 auto;padding:0 24px}
+section{position:relative}
+h1{font-size:clamp(2.6rem,5.4vw,4.6rem);font-weight:800;line-height:1.05;letter-spacing:-.02em}
+.h2{font-size:clamp(1.9rem,3.6vw,2.7rem);font-weight:800;line-height:1.1;letter-spacing:-.02em}
+.lede{font-size:clamp(1rem,1.6vw,1.2rem);color:var(--muted);max-width:640px}
+.badge{display:inline-flex;align-items:center;gap:.5rem;font-size:.8rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);background:rgba(0,229,255,.09);border:1px solid rgba(0,229,255,.25);border-radius:999px;padding:.4rem .9rem;font-family:var(--mono)}
+.badge::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 rgba(40,199,110,.7);animation:ping 1.8s infinite}
+@keyframes ping{0%{box-shadow:0 0 0 0 rgba(40,199,110,.7)}100%{box-shadow:0 0 0 9px rgba(40,199,110,0)}}
+.topbar{position:sticky;top:0;z-index:60;backdrop-filter:blur(12px);background:color-mix(in srgb,var(--bg) 82%,transparent);border-bottom:1px solid var(--line-soft)}
+.topbar .container{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:12px;padding-bottom:12px}
+.logo{display:flex;align-items:center;gap:.7rem;font-weight:800;font-size:1.15rem;letter-spacing:-.01em}
+.logo .mark{width:34px;height:34px;border-radius:10px;display:grid;place-items:center}
+.logo .mark svg{width:100%;height:100%}
+.nav{display:flex;gap:4px;align-items:center}
+.nav a{color:var(--muted);padding:.55rem .95rem;border-radius:9px;font-weight:600;font-size:.95rem;transition:color .2s,background .2s}
+.nav a:hover{color:var(--text);background:rgba(255,255,255,.06)}
+.nav a.cta{color:#04131c;background:var(--accent);border:1px solid rgba(0,229,255,.8);font-weight:700}
+.nav a.btn2{color:var(--text);background:transparent;border:1px solid var(--line)}
+.nav a.btn2:hover{border-color:var(--accent);color:var(--accent)}
+#theme-toggle{background:none;border:1px solid var(--line);border-radius:999px;padding:.45rem .8rem;cursor:pointer;color:var(--text);font-size:.82rem;font-weight:700;display:flex;align-items:center;gap:.45rem;transition:.2s}
+#theme-toggle:hover{border-color:var(--accent)}
+.lang-select{color:var(--text);border:1px solid var(--line);border-radius:9px;padding:.45rem .5rem;font-size:.82rem;cursor:pointer;background:var(--panel-2);font-family:var(--font);font-weight:700;appearance:none;-webkit-appearance:none;outline:none}
+.lang-select:focus{border-color:var(--accent)}
+@media(max-width:820px){.nav .nav-t{display:none}}
+.hero{padding:84px 0 60px;position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(720px 520px at 82% -6%,rgba(0,229,255,.16),transparent 60%),radial-gradient(720px 520px at 8% -8%,rgba(107,33,255,.18),transparent 60%)}
+.hero::after{content:"";position:absolute;inset:0;z-index:-1;opacity:.5;background-image:linear-gradient(var(--line-soft) 1px,transparent 1px),linear-gradient(90deg,var(--line-soft) 1px,transparent 1px);background-size:46px 46px;mask-image:radial-gradient(1200px 700px at 50% 20%,#000 35%,transparent 72%)}
+.hero-inner{display:grid;grid-template-columns:1.1fr .9fr;gap:52px;align-items:center}
+@media(max-width:960px){.hero-inner{grid-template-columns:1fr}.mesh{display:none}}
+.hero-tagline{display:inline-flex;align-items:center;gap:.55rem;padding:.5rem 1rem;border-radius:999px;border:1px solid var(--line);background:var(--panel-2);font-size:.92rem;color:var(--muted);font-weight:600}
+.hero-tagline b{color:var(--accent)}
+.hero h1{margin:1.2rem 0 1.2rem}
+.grad{background:linear-gradient(90deg,var(--accent),var(--accent-2),var(--accent-3));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.hero-meta{display:flex;flex-wrap:wrap;gap:10px;margin:1.4rem 0 1.8rem}
+.pill{display:flex;align-items:center;gap:.45rem;font-size:.85rem;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:9px;padding:.5rem .85rem;background:rgba(255,255,255,.03)}
+.pill .dot{width:8px;height:8px;border-radius:50%}
+.d-bl{background:var(--accent-2)} .d-cn{background:var(--accent-3)} .d-usd{background:var(--good)}
+.hero-actions{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:.6rem;font-weight:700;font-size:1rem;border-radius:12px;padding:.95rem 1.6rem;border:1px solid transparent;cursor:pointer;transition:transform .15s,box-shadow .2s,border-color .2s}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#04131c;border-color:transparent}
+.btn.ghost{color:var(--text);background:var(--panel);border-color:var(--line)}
+.btn.ghost:hover{border-color:var(--accent);color:var(--accent)}
+.hero-copy{margin-top:2.1rem;color:var(--muted);font-size:.98rem}
+.mesh{position:relative}
+.mesh-svg{width:100%;height:auto;display:block;filter:drop-shadow(0 10px 30px rgba(0,229,255,.16))}
+@keyframes blink{50%{opacity:.2}}
+.sec-head{text-align:center;max-width:760px;margin:0 auto 56px}
+.sec-head .kicker{display:inline-block;font-size:.8rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:.9rem}
+.sec-head p{color:var(--muted)}
+section{padding:84px 0}
+@media(max-width:720px){section{padding:64px 0}}
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+@media(max-width:960px){.flow{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:640px){.flow{grid-template-columns:1fr}}
+.flow-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:26px;position:relative;overflow:hidden;transition:transform .2s,border-color .2s,box-shadow .2s}
+.flow-card:hover{transform:translateY(-4px);border-color:rgba(0,229,255,.4);box-shadow:var(--shadow)}
+.flow-card::after{content:attr(data-step);position:absolute;top:14px;right:18px;font-family:var(--mono);font-size:1.1rem;color:var(--dim);font-weight:700}
+.flow-card .ico{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;margin-bottom:18px;font-size:1.5rem}
+.ico-1{background:rgba(107,33,255,.16);border:1px solid rgba(107,33,255,.3)}
+.ico-2{background:rgba(0,229,255,.12);border:1px solid rgba(0,229,255,.3)}
+.ico-3{background:rgba(255,59,107,.13);border:1px solid rgba(255,59,107,.3)}
+.ico-4{background:rgba(40,199,110,.13);border:1px solid rgba(40,199,110,.3)}
+.flow-card p{color:var(--muted);font-size:.95rem;line-height:1.55}
+.flow-card h3{font-size:1.15rem;font-weight:700;margin-bottom:.6rem}
+.flow-card code{background:var(--panel-2);border:1px solid var(--line-soft);border-radius:6px;padding:.12rem .45rem;font-size:.82rem;color:var(--accent);font-family:var(--mono)}
+.feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+@media(max-width:960px){.feat-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.feat-grid{grid-template-columns:1fr}}
+.feat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:26px}
+.feat .tag{display:inline-block;font-size:.75rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:.9rem}
+.feat h3{margin-bottom:.7rem;font-size:1.1rem;font-weight:700}
+.feat p{color:var(--muted);font-size:.95rem;line-height:1.6}
+.term{background:#0a0e1a;border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow)}
+.term-bar{display:flex;align-items:center;gap:.5rem;padding:.9rem 1.2rem;border-bottom:1px solid var(--line);background:var(--panel-2)}
+.term-bar span{width:11px;height:11px;border-radius:50%}
+.term-bar i{color:var(--dim);font-family:var(--mono);font-size:.82rem;margin-left:auto}
+.term-body{padding:1.2rem 1.4rem 1.4rem;display:flex;flex-direction:column;gap:.9rem}
+.term-body pre{font-family:var(--mono);font-size:.92rem;line-height:1.55;white-space:pre-wrap;word-break:break-all;color:var(--text)}
+.t-prompt{color:var(--accent)} .t-in{color:#8ea2c0} .t-out{color:#a8c0e8}
+.t-out .ok{color:var(--good)} .t-out .bad{color:var(--bad)} .t-out .key{color:var(--warn)} .t-out .url{color:var(--accent-3)}
+.status{display:inline-flex;align-items:center;gap:.45rem;font-family:var(--mono);font-size:.82rem;padding:.3rem .65rem;border-radius:999px;border:1px solid}
+.status.on{color:var(--good);border-color:rgba(40,199,110,.4);background:rgba(40,199,110,.08)}
+.status.off{color:var(--bad);border-color:rgba(255,92,107,.4);background:rgba(255,92,107,.08)}
+.status .blink{width:7px;height:7px;border-radius:50%;background:currentColor;animation:blink 1.4s infinite}
+.arch{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:30px;max-width:960px;margin:0 auto}
+.arch-col{display:grid;gap:12px;margin-bottom:26px}
+.arch-col:last-child{margin-bottom:0}
+.arch-col h4{font-size:.8rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:12px}
+.arch-node{border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:16px;background:var(--panel-2);font-size:.94rem}
+.arch-node b{font-weight:700}
+.arch-node span{font-family:var(--mono);font-size:.78rem;color:var(--dim)}
+.arch-div{display:flex;align-items:center;gap:14px}
+.arch-div::before,.arch-div::after{content:"";flex:1;height:1px;background:var(--line)}
+.arch-div span{font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:700;padding:0 .9rem;background:var(--panel-2);border:1px solid var(--line-soft);border-radius:999px}
+@media(max-width:720px){.arch-node{flex-direction:column;align-items:flex-start;gap:6px}}
+.chips{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.chip{border:1px solid var(--line);border-radius:999px;padding:.5rem 1rem;font-size:.9rem;font-weight:600;color:var(--muted);background:var(--panel-2)}
+.chip b{color:var(--accent);margin-left:.35rem}
+.cta-band{margin-top:30px;text-align:center;padding:44px 24px;border:1px solid var(--line);border-radius:var(--radius)}
+.cta-band .sub{color:var(--muted);font-size:.95rem;margin:14px auto 24px;max-width:640px}
+.faq{display:grid;gap:12px;max-width:860px;margin:0 auto}
+.faq-item{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.faq-q{width:100%;text-align:left;cursor:pointer;border:none;background:none;color:var(--text);font-size:1rem;font-weight:700;padding:18px 20px;display:flex;justify-content:space-between;align-items:center;gap:16px}
+.faq-q .pl{transition:transform .2s;color:var(--accent)}
+.faq-item.open .faq-q .pl{transform:rotate(45deg)}
+.faq-a{max-height:0;overflow:hidden;transition:max-height .3s}
+.faq-item.open .faq-a{max-height:400px}
+.faq-a-inner{padding:0 20px 18px;color:var(--muted);font-size:.95rem;line-height:1.6}
+footer{border-top:1px solid var(--line);padding:48px 0 34px}
+.foot-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:36px}
+@media(max-width:820px){.foot-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:540px){.foot-grid{grid-template-columns:1fr}}
+.foot-brand .logo{margin-bottom:1rem}
+.foot-brand p{color:var(--muted);font-size:.92rem;max-width:380px}
+.foot-col h4{font-size:.8rem;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);font-weight:800;margin-bottom:14px}
+.foot-col ul{list-style:none;display:flex;flex-direction:column;gap:9px}
+.foot-col a{color:var(--muted);font-size:.94rem;transition:color .2s}
+.foot-col a:hover{color:var(--accent)}
+.foot-bottom{margin-top:44px;padding-top:24px;border-top:1px solid var(--line-soft);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--dim);font-size:.85rem}
+.foot-bottom a{color:var(--muted)}
+.rv{opacity:0;transform:translateY(22px);transition:opacity .7s ease,transform .7s ease}
+.rv.in{opacity:1;transform:none}
+#toast{position:fixed;left:14px;bottom:16px;z-index:80;background:var(--panel);border:1px solid var(--accent);color:var(--accent);padding:.75rem 1.1rem;border-radius:10px;font-size:.85rem;font-weight:700;box-shadow:var(--shadow);opacity:0;transform:translateY(8px);transition:.25s;pointer-events:none}
+#toast.show{opacity:1;transform:none}
+@media(max-width:720px){#backtop{display:none}}
+</style>
+</head>
+<body>
+<a id="backtop" href="#top" class="btn ghost" style="position:fixed;right:18px;bottom:18px;z-index:55;cursor:pointer;font-size:.8rem;padding:.55rem .9rem;" title="Back to top">↑</a>
+<div id="toast"></div>
+
+<header class="topbar">
+  <div class="container">
+    <a class="logo" href="#top"><span class="mark"><svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="m" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#00e5ff"/><stop offset="1" stop-color="#6b21ff"/></linearGradient></defs><circle cx="32" cy="28" r="12" fill="#00e5ff"/><circle cx="20" cy="46" r="6" fill="url(#m)"/><circle cx="44" cy="46" r="6" fill="url(#m)"/><circle cx="32" cy="46" r="6" fill="#ff3b6b"/></svg></span>MESH</a>
+    <nav class="nav">
+      <a class="nav-t" href="#how"><span data-i18n="nav.how">How</span></a>
+      <a class="nav-t btn2" href="#node"><span data-i18n="nav.node">Live node</span></a>
+      <a class="nav-t btn2" href="#arch"><span data-i18n="nav.arch">Architecture</span></a>
+      <a class="nav-t btn2" href="#faq"><span data-i18n="nav.faq">FAQ</span></a>
+      <a class="cta" href="#start"><span data-i18n="nav.code">Get the code</span></a>
+      <button id="theme-toggle" type="button" aria-label="Toggle theme">☀ Light</button>
+      <select id="lang-select" class="lang-select" title="Language">
+        <option value="en">EN</option>
+        <option value="zh">中文</option>
+        <option value="fr">FR</option>
+      </select>
+    </nav>
+  </div>
+</header>
+
+<section class="hero" id="top">
+  <div class="container">
+    <div class="hero-inner">
+      <div class="rv">
+        <div class="hero-tagline"><b>●</b> <span data-i18n="hero.tagline">Live public node online</span></div>
+        <h1><span data-i18n="hero.h1a">Share AI compute</span><br><span class="grad" data-i18n="hero.h1b">peer-to-peer</span><br><span data-i18n="hero.h1c">settle in USDT.</span></h1>
+        <p class="lede" data-i18n="hero.lede">MeshLLM is a permissionless network of GPU nodes. Providers lend compute, consumers book models by the token, and every call settles atomically on Solana — over an end-to-end encrypted data plane. No middleman sees your prompt.</p>
+        <div class="hero-meta">
+          <span class="pill"><span class="dot d-bl"></span> <span data-i18n="hero.p1">E2EE data plane</span></span>
+          <span class="pill"><span class="dot d-cn"></span> <span data-i18n="hero.p2">P2P + relays</span></span>
+          <span class="pill"><span class="dot d-usd"></span> <span data-i18n="hero.p3">USDT escrow</span></span>
+        </div>
+        <div class="hero-actions">
+          <a class="btn primary" href="#start"><span data-i18n="hero.action1">Deploy a node</span></a>
+          <a class="btn ghost" href="#how"><span data-i18n="hero.action2">How it works</span> →</a>
+        </div>
+        <p class="hero-copy"><span data-i18n="hero.copy">Every node is an edge case. Your prompt never touches the operator.</span> <code>MESH</code></p>
+      </div>
+      <div class="mesh rv" aria-hidden="true">
+        <svg class="mesh-svg" viewBox="0 0 520 440" xmlns="http://www.w3.org/2000/svg">
+          <defs><filter id="glow"><feGaussianBlur stdDeviation="4"/></filter></defs>
+          <g stroke="rgba(0,229,255,.55)" stroke-width="1.6" fill="none" opacity=".8">
+            <line x1="90" y1="90" x2="300" y2="150" stroke-dasharray="8 10"><animate attributeName="stroke-dashoffset" from="18" to="0" dur="4s" repeatCount="indefinite"/></line>
+            <line x1="300" y1="150" x2="430" y2="80" stroke-dasharray="8 10"><animate attributeName="stroke-dashoffset" from="-18" to="0" dur="4.4s" repeatCount="indefinite"/></line>
+            <line x1="90" y1="90" x2="230" y2="340" stroke-dasharray="8 10"><animate attributeName="stroke-dashoffset" from="18" to="0" dur="5s" repeatCount="indefinite"/></line>
+            <line x1="230" y1="340" x2="410" y2="350" stroke-dasharray="8 10"><animate attributeName="stroke-dashoffset" from="18" to="0" dur="4.8s" repeatCount="indefinite"/></line>
+            <line x1="230" y1="340" x2="300" y2="150" stroke-dasharray="8 10"><animate attributeName="stroke-dashoffset" from="-18" to="0" dur="5.2s" repeatCount="indefinite"/></line>
+            <line x1="410" y1="350" x2="430" y2="80" stroke-dasharray="8 10"><animate attributeName="stroke-dashoffset" from="18" to="0" dur="5.6s" repeatCount="indefinite"/></line>
+          </g>
+          <g>
+            <circle cx="90" cy="90" r="10" fill="rgba(0,229,255,.2)" stroke="#00e5ff" stroke-width="3" filter="url(#glow)"/><circle cx="90" cy="90" r="4" fill="#00e5ff"/>
+            <text x="90" y="68" text-anchor="middle" fill="#8ea2c0" font-size="13" font-family="monospace">consumer</text>
+            <circle cx="300" cy="150" r="14" fill="rgba(107,33,255,.2)" stroke="#6b21ff" stroke-width="3" filter="url(#glow)"/><circle cx="300" cy="150" r="6" fill="#6b21ff"/>
+            <text x="300" y="122" text-anchor="middle" fill="#8ea2c0" font-size="13" font-family="monospace">mesh</text>
+            <circle cx="430" cy="80" r="10" fill="rgba(255,59,107,.2)" stroke="#ff3b6b" stroke-width="3" filter="url(#glow)"/><circle cx="430" cy="80" r="4" fill="#ff3b6b"/>
+            <text x="430" y="58" text-anchor="middle" fill="#8ea2c0" font-size="13" font-family="monospace">provider</text>
+            <circle cx="230" cy="340" r="10" fill="rgba(40,199,110,.2)" stroke="#28c76e" stroke-width="3" filter="url(#glow)"/><circle cx="230" cy="340" r="4" fill="#28c76e"/>
+            <text x="230" y="368" text-anchor="middle" fill="#8ea2c0" font-size="13" font-family="monospace">provider</text>
+            <circle cx="410" cy="350" r="10" fill="rgba(255,184,13,.2)" stroke="#f5b80d" stroke-width="3" filter="url(#glow)"/><circle cx="410" cy="350" r="4" fill="#f5b80d"/>
+            <text x="410" y="378" text-anchor="middle" fill="#8ea2c0" font-size="13" font-family="monospace">relay</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="rv">
+  <div class="container">
+    <div class="sec-head">
+      <span class="kicker" data-i18n="prob.kicker">The problem it solves</span>
+      <h2 class="h2" data-i18n="prob.h2">AI inference shouldn't be a walled garden.</h2>
+      <p style="color:var(--muted)" data-i18n="prob.p">Every inference is expensive, every provider is a trust boundary. MeshLLM turns idle GPUs into a market, puts an escrow between buyer and seller, and keeps the data plane private end to end.</p>
+    </div>
+    <div class="feat-grid">
+      <div class="feat"><span class="tag" data-i18n="feat.t1">Decentralised</span><h3 data-i18n="feat.h1">Permissionless mesh</h3><p data-i18n="feat.p1">Any node with a wallet and a GPU can join. Providers publish listings; consumers discover them via a content-addressed directory. No single party gates who can compute.</p></div>
+      <div class="feat"><span class="tag" data-i18n="feat.t2">Encrypted</span><h3 data-i18n="feat.h2">E2EE data plane</h3><p data-i18n="feat.p2">Each session builds its own AES-256-GCM key from ephemeral P-256 ECDH and wallet-bound Ed25519. The platform relays ciphertext only — it never sees your prompt or reply.</p></div>
+      <div class="feat"><span class="tag" data-i18n="feat.t3">Settled</span><h3 data-i18n="feat.h3">USDT escrow</h3><p data-i18n="feat.p3">FUND → IN_CALL → SETTLE_WINDOW → SETTLED. The escrow state machine holds funds before the call and settles by measured tokens. No failed calls, no trust.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="rv" id="how">
+  <div class="container">
+    <div class="sec-head">
+      <span class="kicker" data-i18n="how.kicker">The loop</span>
+      <h2 class="h2" data-i18n="how.h2">Four steps. Zero trust in the middle.</h2>
+      <p style="color:var(--muted)" data-i18n="how.p">A call flows through the same four beats — discovery, escrow, encrypted inference, settlement.</p>
+    </div>
+    <div class="flow">
+      <div class="flow-card" data-step="01"><div class="ico ico-1">🌐</div><h3 data-i18n="how.f1.h">Discover</h3><p><span data-i18n="how.f1.p1">Consumer queries the directory for a model (e.g.</span><code>/listings</code><span data-i18n="how.f1.p2">). Listings are content-addressed and signed, so they can't be forged. The consumer picks a provider it can reach.</span></p></div>
+      <div class="flow-card" data-step="02"><div class="ico ico-2">💵</div><h3 data-i18n="how.f2.h">Fund escrow</h3><p><span data-i18n="how.f2.p1">The consumer locks the expected fee + bond in the escrow state machine. State moves</span><code>EMPTY → FUNDED</code><span data-i18n="how.f2.p2">. If the call dies, the funds are returned, not leaked.</span></p></div>
+      <div class="flow-card" data-step="03"><div class="ico ico-3">🔐</div><h3 data-i18n="how.f3.h">Run E2EE</h3><p data-i18n="how.f3.p">Signalling opens an encrypted data channel (direct P2P or via a relay). Prompts go to the provider's GPU; replies stream back — all ciphertext, all session-keyed.</p></div>
+      <div class="flow-card" data-step="04"><div class="ico ico-4">✅</div><h3 data-i18n="how.f4.h">Settle</h3><p><span data-i18n="how.f4.p1">The provider submits a usage receipt. The escrow verifies against the transcript hash and moves to</span><code>SETTLED</code><span data-i18n="how.f4.p2">, releasing payment to the provider on-chain.</span></p></div>
+    </div>
+  </div>
+</section>
+
+<section class="rv" id="arch">
+  <div class="container">
+    <div class="sec-head">
+      <span class="kicker" data-i18n="arch.kicker">How it's wired</span>
+      <h2 class="h2" data-i18n="arch.h2">Three planes, cleanly separated.</h2>
+    </div>
+    <div class="arch">
+      <div class="arch-col"><h4 data-i18n="arch.c1">Data plane — P2P + E2EE</h4>
+        <div class="arch-node"><b data-i18n="arch.a1">Consumer (browser / node app)</b><span>web · bridge</span></div>
+        <div class="arch-node"><b data-i18n="arch.a2">E2EE channel — AES-256-GCM</b><span>P-256 ephemeral · Ed25519 bind</span></div>
+        <div class="arch-node"><b data-i18n="arch.a3">Provider node (GPU)</b><span>/signal · /dc · relay</span></div>
+      </div>
+      <div class="arch-div"><span data-i18n="arch.d1">relayed only as ciphertext</span></div>
+      <div class="arch-col"><h4 data-i18n="arch.c2">Control plane — lightweight today</h4>
+        <div class="arch-node"><b data-i18n="arch.b1">Directory</b><span>listings · presence · DHT (v2)</span></div>
+        <div class="arch-node"><b data-i18n="arch.b2">Signalling / relay</b><span>WS /signal · /dc · WebRTC (v2)</span></div>
+        <div class="arch-node"><b data-i18n="arch.b3">Escrow state machine</b><span>sim · devnet · on-chain (v2)</span></div>
+      </div>
+      <div class="arch-div"><span data-i18n="arch.d2">settlement</span></div>
+      <div class="arch-col"><h4 data-i18n="arch.c3">Settlement plane — Solana USDT</h4>
+        <div class="arch-node"><b data-i18n="arch.n1">mesh-escrow (Anchor program)</b><span>FUNDED · IN_CALL · SETTLED</span></div>
+        <div class="arch-node"><b data-i18n="arch.n2">USDT (devnet → mainnet)</b><span>micro-USDT raw amounts</span></div>
+        <div class="arch-node"><b data-i18n="arch.n3">Wallets (Ed25519)</b><span>identity + bind signatures</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="rv" id="node">
+  <div class="container">
+    <div class="sec-head">
+      <span class="kicker" data-i18n="node.kicker">Prove it</span>
+      <h2 class="h2" data-i18n="node.h2">A public node, running now.</h2>
+      <p style="color:var(--muted)"><span data-i18n="node.p1">This is the first public mesh node — a real server on the internet. Hit “Ping” to fetch its</span><code>/health</code><span data-i18n="node.p2a">, </span><code>/config</code><span data-i18n="node.p2b">, and </span><code>/listings</code><span data-i18n="node.p3"> endpoints over HTTPS.</span></p>
+    </div>
+    <div class="term" style="max-width:920px;margin:0 auto">
+      <div class="term-bar">
+        <span style="background:#ff5c6b"></span><span style="background:#f5b80d"></span><span style="background:#28c76e"></span>
+        <i>curl https://68.64.183.89:4011/…</i>
+      </div>
+      <div class="term-body">
+        <pre>
+<span class="t-prompt">$</span> curl -sk https://68.64.183.89:4011/health
+<span class="t-out" id="health-out"><span class="ok">{"ok":true,"settleMode":"sim","ts":<span id="health-ts">…</span>}</span></span>
+<span class="t-prompt">$</span> curl -sk https://68.64.183.89:4011/config
+<span class="t-out" id="cfg-out"><span class="url">rpcUrl=https://api.devnet.solana.com</span> · <span class="key">usdtMint=Es9vM…</span> · <span class="ok">settleMode=sim</span></span>
+<span class="t-prompt">$</span> curl -sk https://68.64.183.89:4011/listings
+<span class="t-out" id="list-out"><span class="ok">{"listings":[]}</span></span>
+        </pre>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn primary" id="ping-btn" style="font-size:.85rem;padding:.65rem 1.1rem"><span data-i18n="node.btn">⟳ Ping public node</span></button>
+          <span class="status" id="status-chip"><span class="blink"></span><span id="status-text" data-i18n="node.status">idle — click ping to check</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="rv" id="road">
+  <div class="container">
+    <div class="sec-head">
+      <span class="kicker" data-i18n="road.kicker">Roadmap — going decentral</span>
+      <h2 class="h2" data-i18n="road.h2">Today's centre of control → tomorrow's nothing.</h2>
+    </div>
+    <div class="flow">
+      <div class="flow-card" data-step="01"><div class="ico ico-1">🗂</div><h3 data-i18n="road.f1.h">Directory → DHT</h3><p data-i18n="road.f1.p">Single REST directory becomes libp2p Kademlia + gossip. Listings are already content-addressed &amp; signed — tamper-proof without a central server.</p></div>
+      <div class="flow-card" data-step="02"><div class="ico ico-2">📡</div><h3 data-i18n="road.f2.h">Signalling → libp2p + relays</h3><p data-i18n="road.f2.p">WS rooms move to P2P direct-connect with a small relay pool for NAT; the E2EE is transport-agnostic, so it just drops in.</p></div>
+      <div class="flow-card" data-step="03"><div class="ico ico-3">🔗</div><h3 data-i18n="road.f3.h">Escrow → on-chain</h3><p><span data-i18n="road.f3.p1">Sim ledger becomes the real mesh-escrow Anchor program on Solana. The chain</span><em data-i18n="road.f3.em">is</em><span data-i18n="road.f3.p2"> the decentralised state machine.</span></p></div>
+      <div class="flow-card" data-step="04"><div class="ico ico-4">🌐</div><h3 data-i18n="road.f4.h">Node becomes optional</h3><p><span data-i18n="road.f4.p1">With DHT + relays + on-chain escrow, the</span><code>server</code><span data-i18n="road.f4.p2"> process shrinks to one seed node — the network runs without any single point.</span></p></div>
+    </div>
+  </div>
+</section>
+
+<section class="rv" id="tech">
+  <div class="container">
+    <div class="sec-head"><span class="kicker" data-i18n="tech.kicker">Tech</span><h2 class="h2" data-i18n="tech.h2">Built for the edge.</h2></div>
+    <div class="chips" style="margin-bottom:22px">
+      <span class="chip">Node.js 22 <b>ESM</b></span>
+      <span class="chip">Express <b>REST+WS</b></span>
+      <span class="chip">webcrypto <b>P-256 ECDH</b></span>
+      <span class="chip">tweetnacl <b>Ed25519</b></span>
+      <span class="chip">@solana/web3.js <b>escrow</b></span>
+      <span class="chip">Anchor (Rust) <b>mesh-escrow</b></span>
+      <span class="chip">OpenAI API <b>providers</b></span>
+      <span class="chip">Nginx <b>edge</b></span>
+      <span class="chip">Cloudflare <b>DNS+TLS</b></span>
+    </div>
+    <p style="color:var(--muted);max-width:720px;margin:0 auto;text-align:center;font-size:.98rem">
+      <span data-i18n="tech.p1">The data-plane protocol (frames, handshake, transcript hashes) is defined in</span><code>@mesh/shared</code><span data-i18n="tech.p2">. Providers point</span><code>agent/config.json</code><span data-i18n="tech.p3"> at any OpenAI-compatible or Anthropic endpoint; the mesh relays only what the consumer encrypts.</span>
+    </p>
+  </div>
+</section>
+
+<section class="rv" id="start">
+  <div class="container">
+    <div class="sec-head">
+      <span class="kicker" data-i18n="start.kicker">Get going</span>
+      <h2 class="h2" data-i18n="start.h2">Three commands to run a node.</h2>
+      <p style="color:var(--muted)" data-i18n="start.p">Clone the repo, install, and boot the headless server. Point any consumer at the node's HTTPS URL.</p>
+    </div>
+    <div class="term" style="max-width:880px;margin:0 auto">
+      <div class="term-bar">
+        <span style="background:#ff5c6b"></span><span style="background:#f5b80d"></span><span style="background:#28c76e"></span>
+        <i>node — bash</i>
+      </div>
+      <div class="term-body">
+        <pre>
+<span class="t-prompt">$</span> git clone https://github.com/<span class="t-in">you</span>/ai-compute-mesh
+<span class="t-prompt">$</span> cd ai-compute-mesh && npm install
+<span class="t-prompt">$</span> MESH_HOST=0.0.0.0 MESH_PORT=4011 MESH_SETTLE_MODE=sim node server/src/index.js
+<span class="t-out"><span class="ok">[meshllm] server on https://0.0.0.0:4011 (settleMode=sim, tls=self-signed)</span></span>
+<span class="t-out"><span class="ok">✓ /health  ✓ /config  ✓ /listings  ✓ /dc (WSS)</span></span>
+        </pre>
+      </div>
+    </div>
+    <div class="cta-band">
+      <h2 class="h2" style="text-align:center" data-i18n="start.cta.h2">Run your own node.</h2>
+      <p class="sub" data-i18n="start.cta.sub">The first public node is live. Add yours to the mesh in three commands — and connect any consumer (WorkBuddy, your own agent, or the OpenAI-bridge) to it.</p>
+      <div style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap">
+        <a class="btn primary" href="#"><span data-i18n="start.btn1">Clone on GitHub</span></a>
+        <a class="btn ghost" href="#tech"><span data-i18n="start.btn2">Read the architecture</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="rv" id="faq">
+  <div class="container">
+    <div class="sec-head" style="margin-bottom:36px">
+      <span class="kicker" data-i18n="faq.kicker">Questions</span>
+      <h2 class="h2" data-i18n="faq.h2">FAQ.</h2>
+    </div>
+    <div class="faq">
+      <div class="faq-item"><button class="faq-q" type="button"><span data-i18n="faq.q1">Is my prompt safe from the mesh operator?</span><span class="pl">+</span></button><div class="faq-a"><div class="faq-a-inner"><span data-i18n="faq.a1.1">Yes. The mesh only relays</span><em data-i18n="faq.a1.em">ciphertext</em><span data-i18n="faq.a1.2">. Every session is keyed with ephemeral P-256 ECDH plus wallet-bound Ed25519 bind signatures, then HKDF-derived into an AES-256-GCM key. The operator holds the relay and nothing else — it literally cannot decrypt your prompt.</span></div></div></div>
+      <div class="faq-item"><button class="faq-q" type="button"><span data-i18n="faq.q2">What if the provider goes offline mid-call?</span><span class="pl">+</span></button><div class="faq-a"><div class="faq-a-inner" data-i18n="faq.a2">Escrow holds the funds until settlement. If a call stays IN_CALL longer than the call timeout, the server's orphan-reaper returns the consumer to FUNDED and logs the abandoned call — so no payment is leaked when a provider dies.</div></div></div>
+      <div class="faq-item"><button class="faq-q" type="button"><span data-i18n="faq.q3">Do I need a wallet to consume?</span><span class="pl">+</span></button><div class="faq-a"><div class="faq-a-inner"><span data-i18n="faq.a3.1">Yes — an Ed25519 wallet. In</span><code>sim</code><span data-i18n="faq.a3.2"> mode a wallet with no prior balance is automatically credited 100 USDT on first verified login, so you can try the mesh for free. In</span><code>devnet</code><span data-i18n="faq.a3.3">/mainnet you deposit real USDT into the escrow.</span></div></div></div>
+      <div class="faq-item"><button class="faq-q" type="button"><span data-i18n="faq.q4">How do providers get paid?</span><span class="pl">+</span></button><div class="faq-a"><div class="faq-a-inner" data-i18n="faq.a4">Per call, tokens are counted against the consumer's lock and settled to the provider after the transcript-hash check passes. Pricing is per 1k input/output tokens in micro-USDT, with a minimum fee and a bond; the provider's declared tolerance (default ±5%) bounds metering.</div></div></div>
+      <div class="faq-item"><button class="faq-q" type="button"><span data-i18n="faq.q5">Is the network really decentralised yet?</span><span class="pl">+</span></button><div class="faq-a"><div class="faq-a-inner" data-i18n="faq.a5">The data plane already is (P2P + E2EE, no central decryption). The control plane is lightweight-centred today — one Express node doing directory + signalling + escrow. The v2 roadmap replaces it with libp2p DHT + relays + on-chain escrow, so the central process shrinks to a single seed node.</div></div></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a class="logo" href="#top"><span class="mark"><svg viewBox="0 0 64 64"><defs><linearGradient id="m2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#00e5ff"/><stop offset="1" stop-color="#6b21ff"/></linearGradient></defs><circle cx="32" cy="28" r="12" fill="#00e5ff"/><circle cx="20" cy="46" r="6" fill="url(#m2)"/><circle cx="44" cy="46" r="6" fill="url(#m2)"/><circle cx="32" cy="46" r="6" fill="#ff3b6b"/></svg></span>MESH</a>
+        <p data-i18n="foot.brand">Open peer-to-peer AI compute sharing. Encrypted data plane, USDT escrow settlement, and a directory on its way to the DHT.</p>
+      </div>
+      <div class="foot-col"><h4 data-i18n="foot.h1">Product</h4><ul><li><a href="#how"><span data-i18n="foot.l1">How it works</span></a></li><li><a href="#arch"><span data-i18n="foot.l2">Architecture</span></a></li><li><a href="#node"><span data-i18n="foot.l3">Live node</span></a></li><li><a href="#tech"><span data-i18n="foot.l4">Stack</span></a></li></ul></div>
+      <div class="foot-col"><h4 data-i18n="foot.h2">Node</h4><ul><li><a href="#node" style="color:var(--accent);font-weight:700">● 68.64.183.89:4011</a></li><li><a href="#start"><span data-i18n="foot.l5">Deploy yours</span></a></li><li><a href="#faq"><span data-i18n="foot.l6">FAQ</span></a></li></ul></div>
+      <div class="foot-col"><h4 data-i18n="foot.h3">Endpoints</h4><ul><li><a href="#" style="font-family:var(--mono);font-size:.85rem">/health</a></li><li><a href="#" style="font-family:var(--mono);font-size:.85rem">/config</a></li><li><a href="#" style="font-family:var(--mono);font-size:.85rem">/listings</a></li><li><a href="#" style="font-family:var(--mono);font-size:.85rem">/dc (WSS)</a></li></ul></div>
+    </div>
+    <div class="foot-bottom">
+      <span>© <span id="year"></span> MeshLLM <span data-i18n="foot.oss">— open source.</span></span>
+      <span><span style="color:var(--dim);font-weight:700">SettleMode:</span> <b style="color:var(--good);font-weight:700">sim</b> <span data-i18n="foot.sim">· First public node online</span></span>
+    </div>
+  </div>
+</footer>
+<script>
+/* ================= i18n dictionaries ================= */
+var LANGS={
+ en:{
+  "nav.how":"How","nav.node":"Live node","nav.arch":"Architecture","nav.faq":"FAQ","nav.code":"Get the code",
+  "themeLight":"☀ Light","themeDark":"🌙 Dark",
+  "hero.tagline":"Live public node online","hero.h1a":"Share AI compute","hero.h1b":"peer-to-peer","hero.h1c":"settle in USDT.",
+  "hero.lede":"MeshLLM is a permissionless network of GPU nodes. Providers lend compute, consumers book models by the token, and every call settles atomically on Solana — over an end-to-end encrypted data plane. No middleman sees your prompt.",
+  "hero.p1":"E2EE data plane","hero.p2":"P2P + relays","hero.p3":"USDT escrow","hero.action1":"Deploy a node","hero.action2":"How it works","hero.copy":"Every node is an edge case. Your prompt never touches the operator.",
+  "prob.kicker":"The problem it solves","prob.h2":"AI inference shouldn't be a walled garden.","prob.p":"Every inference is expensive, every provider is a trust boundary. MeshLLM turns idle GPUs into a market, puts an escrow between buyer and seller, and keeps the data plane private end to end.",
+  "feat.t1":"Decentralised","feat.h1":"Permissionless mesh","feat.p1":"Any node with a wallet and a GPU can join. Providers publish listings; consumers discover them via a content-addressed directory. No single party gates who can compute.",
+  "feat.t2":"Encrypted","feat.h2":"E2EE data plane","feat.p2":"Each session builds its own AES-256-GCM key from ephemeral P-256 ECDH and wallet-bound Ed25519. The platform relays ciphertext only — it never sees your prompt or reply.",
+  "feat.t3":"Settled","feat.h3":"USDT escrow","feat.p3":"FUND → IN_CALL → SETTLE_WINDOW → SETTLED. The escrow state machine holds funds before the call and settles by measured tokens. No failed calls, no trust.",
+  "how.kicker":"The loop","how.h2":"Four steps. Zero trust in the middle.","how.p":"A call flows through the same four beats — discovery, escrow, encrypted inference, settlement.",
+  "how.f1.h":"Discover","how.f1.p1":"Consumer queries the directory for a model (e.g.","how.f1.p2":"). Listings are content-addressed and signed, so they can't be forged. The consumer picks a provider it can reach.",
+  "how.f2.h":"Fund escrow","how.f2.p1":"The consumer locks the expected fee + bond in the escrow state machine. State moves","how.f2.p2":". If the call dies, the funds are returned, not leaked.",
+  "how.f3.h":"Run E2EE","how.f3.p":"Signalling opens an encrypted data channel (direct P2P or via a relay). Prompts go to the provider's GPU; replies stream back — all ciphertext, all session-keyed.",
+  "how.f4.h":"Settle","how.f4.p1":"The provider submits a usage receipt. The escrow verifies against the transcript hash and moves to","how.f4.p2":", releasing payment to the provider on-chain.",
+  "arch.kicker":"How it's wired","arch.h2":"Three planes, cleanly separated.","arch.c1":"Data plane — P2P + E2EE","arch.a1":"Consumer (browser / node app)","arch.a2":"E2EE channel — AES-256-GCM","arch.a3":"Provider node (GPU)","arch.d1":"relayed only as ciphertext",
+  "arch.c2":"Control plane — lightweight today","arch.b1":"Directory","arch.b2":"Signalling / relay","arch.b3":"Escrow state machine","arch.d2":"settlement",
+  "arch.c3":"Settlement plane — Solana USDT","arch.n1":"mesh-escrow (Anchor program)","arch.n2":"USDT (devnet → mainnet)","arch.n3":"Wallets (Ed25519)",
+  "node.kicker":"Prove it","node.h2":"A public node, running now.","node.p1":"This is the first public mesh node — a real server on the internet. Hit “Ping” to fetch its","node.p2a":", ","node.p2b":", and ","node.p3":" endpoints over HTTPS.",
+  "node.btn":"⟳ Ping public node","node.status":"idle — click ping to check",
+  "road.kicker":"Roadmap — going decentral","road.h2":"Today's centre of control → tomorrow's nothing.","road.f1.h":"Directory → DHT","road.f1.p":"Single REST directory becomes libp2p Kademlia + gossip. Listings are already content-addressed &amp; signed — tamper-proof without a central server.",
+  "road.f2.h":"Signalling → libp2p + relays","road.f2.p":"WS rooms move to P2P direct-connect with a small relay pool for NAT; the E2EE is transport-agnostic, so it just drops in.",
+  "road.f3.h":"Escrow → on-chain","road.f3.p1":"Sim ledger becomes the real mesh-escrow Anchor program on Solana. The chain","road.f3.em":"is","road.f3.p2":" the decentralised state machine.","road.f4.h":"Node becomes optional","road.f4.p1":"With DHT + relays + on-chain escrow, the","road.f4.p2":" process shrinks to one seed node — the network runs without any single point.",
+  "tech.kicker":"Tech","tech.h2":"Built for the edge.","tech.p1":"The data-plane protocol (frames, handshake, transcript hashes) is defined in","tech.p2":". Providers point","tech.p3":" at any OpenAI-compatible or Anthropic endpoint; the mesh relays only what the consumer encrypts.",
+  "start.kicker":"Get going","start.h2":"Three commands to run a node.","start.p":"Clone the repo, install, and boot the headless server. Point any consumer at the node's HTTPS URL.",
+  "start.cta.h2":"Run your own node.","start.cta.sub":"The first public node is live. Add yours to the mesh in three commands — and connect any consumer (WorkBuddy, your own agent, or the OpenAI-bridge) to it.","start.btn1":"Clone on GitHub","start.btn2":"Read the architecture",
+  "faq.kicker":"Questions","faq.h2":"FAQ.","faq.q1":"Is my prompt safe from the mesh operator?","faq.a1.1":"Yes. The mesh only relays","faq.a1.em":"ciphertext","faq.a1.2":". Every session is keyed with ephemeral P-256 ECDH plus wallet-bound Ed25519 bind signatures, then HKDF-derived into an AES-256-GCM key. The operator holds the relay and nothing else — it literally cannot decrypt your prompt.",
+  "faq.q2":"What if the provider goes offline mid-call?","faq.a2":"Escrow holds the funds until settlement. If a call stays IN_CALL longer than the call timeout, the server's orphan-reaper returns the consumer to FUNDED and logs the abandoned call — so no payment is leaked when a provider dies.",
+  "faq.q3":"Do I need a wallet to consume?","faq.a3.1":"Yes — an Ed25519 wallet. In","faq.a3.2":" mode a wallet with no prior balance is automatically credited 100 USDT on first verified login, so you can try the mesh for free. In","faq.a3.3":"/mainnet you deposit real USDT into the escrow.",
+  "faq.q4":"How do providers get paid?","faq.a4":"Per call, tokens are counted against the consumer's lock and settled to the provider after the transcript-hash check passes. Pricing is per 1k input/output tokens in micro-USDT, with a minimum fee and a bond; the provider's declared tolerance (default ±5%) bounds metering.",
+  "faq.q5":"Is the network really decentralised yet?","faq.a5":"The data plane already is (P2P + E2EE, no central decryption). The control plane is lightweight-centred today — one Express node doing directory + signalling + escrow. The v2 roadmap replaces it with libp2p DHT + relays + on-chain escrow, so the central process shrinks to a single seed node.",
+  "foot.brand":"Open peer-to-peer AI compute sharing. Encrypted data plane, USDT escrow settlement, and a directory on its way to the DHT.","foot.h1":"Product","foot.l1":"How it works","foot.l2":"Architecture","foot.l3":"Live node","foot.l4":"Stack","foot.h2":"Node","foot.l5":"Deploy yours","foot.l6":"FAQ","foot.h3":"Endpoints","foot.oss":"— open source.","foot.sim":"· First public node online",
+  "pinging":"pinging…","status.on":"node online · ","status.s":"listing(s)","status.off":"unreachable","status.failed":"failed",
+  "toast.on":"Node online · ","toast.s":"listing(s)","toast.off":"Node unreachable: ",
+  "list.found":"→ found ","list.s":"listing(s)","list.none":"→ no listings yet (add a provider)"
+ },
+ zh:{
+  "nav.how":"原理","nav.node":"在线节点","nav.arch":"架构","nav.faq":"FAQ","nav.code":"获取代码",
+  "themeLight":"☀ 浅色","themeDark":"🌙 深色",
+  "hero.tagline":"公共节点已上线","hero.h1a":"共享 AI 算力","hero.h1b":"点对点","hero.h1c":"以 USDT 结算。",
+  "hero.lede":"MeshLLM 是一个无许可的 GPU 节点网络。提供方出借算力，消费方按 token 预订模型，每一次调用都在 Solana 上原子结算 —— 基于端到端加密的数据平面。没有任何中间方会看到你的提示词。",
+  "hero.p1":"端到端加密数据平面","hero.p2":"P2P + 中继","hero.p3":"USDT 托管","hero.action1":"部署一个节点","hero.action2":"工作原理","hero.copy":"每个节点都是边缘用例。你的提示词永远不会接触运营方。",
+  "prob.kicker":"解决的问题","prob.h2":"AI 推理不该被围墙隔离。","prob.p":"每一次推理都很昂贵，每个提供方都是一道信任边界。MeshLLM 将闲置 GPU 变成市场，在买方与卖方之间设立托管，并让数据平面端到端保持私密。",
+  "feat.t1":"去中心化","feat.h1":"无许可网格","feat.p1":"任何拥有钱包和 GPU 的节点都能加入。提供方发布 listing；消费方通过内容寻址目录发现它们。没有单一方控制谁能计算。",
+  "feat.t2":"加密","feat.h2":"端到端加密数据平面","feat.p2":"每个会话都会用临时 P-256 ECDH 和绑定钱包的 Ed25519 生成自己的 AES-256-GCM 密钥。平台仅转发密文 —— 它永远看不到你的提示词或回复。",
+  "feat.t3":"已结算","feat.h3":"USDT 托管","feat.p3":"FUND → IN_CALL → SETTLE_WINDOW → SETTLED。托管状态机在调用前托管资金，并按测得的 token 结算。没有失败的调用，不需要信任。",
+  "how.kicker":"流程","how.h2":"四步。中间零信任。","how.p":"一次调用经过相同的四个环节 —— 发现、托管、加密推理、结算。",
+  "how.f1.h":"发现","how.f1.p1":"消费方查询目录中的模型（","how.f1.p2":"）。Listing 是内容寻址且签名的，无法伪造。消费方选择能连到的提供方。",
+  "how.f2.h":"资金托管","how.f2.p1":"消费方将预期费用 + 保证金锁入托管状态机。状态转为","how.f2.p2":"。如果调用失败，资金返还，而非泄露。",
+  "how.f3.h":"建立加密通道","how.f3.p":"信令打开一条加密数据通道（直连 P2P 或经中继）。提示词发到提供方 GPU；回复流式返回 —— 全是密文，全部由会话密钥保护。",
+  "how.f4.h":"结算","how.f4.p1":"提供方提交用量回执。托管按对话哈希验证，并转为","how.f4.p2":"，并将款项在链上支付给提供方。",
+  "arch.kicker":"架构设计","arch.h2":"三层平面，清晰分离。","arch.c1":"数据平面 — P2P + E2EE","arch.a1":"消费者（浏览器 / 节点应用）","arch.a2":"E2EE 通道 — AES-256-GCM","arch.a3":"提供方节点（GPU）","arch.d1":"仅以密文传输",
+  "arch.c2":"控制平面 — 当前轻量","arch.b1":"目录","arch.b2":"信令 / 中继","arch.b3":"托管状态机","arch.d2":"结算",
+  "arch.c3":"结算平面 — Solana USDT","arch.n1":"mesh-escrow（Anchor 程序）","arch.n2":"USDT（devnet → mainnet）","arch.n3":"钱包（Ed25519）",
+  "node.kicker":"验证","node.h2":"一个公共节点，正在运行。","node.p1":"这是第一个公共 mesh 节点 —— 一个真实的互联网服务器。点击“Ping”获取其","node.p2a":"、","node.p2b":"、以及","node.p3":"端点，经 HTTPS。",
+  "node.btn":"⟳ 测试公共节点","node.status":"待测 —— 点击测试",
+  "road.kicker":"路线图 — 去中心化","road.h2":"今天的控制中心 → 明天的零中心化。","road.f1.h":"目录 → DHT","road.f1.p":"单一 REST 目录变为 libp2p Kademlia + gossip。Listing 已是内容寻址并签名 —— 无需中心服务器即可防篡改。",
+  "road.f2.h":"信令 → libp2p + 中继","road.f2.p":"WS 房间转为 P2P 直连，配一个小型中继池处理 NAT；E2EE 与传输无关，直接嵌入即可。",
+  "road.f3.h":"托管 → 链上","road.f3.p1":"Sim 账本变为 Solana 上真实的 mesh-escrow Anchor 程序。链","road.f3.em":"就是","road.f3.p2":"去中心化的状态机。","road.f4.h":"节点变为可选","road.f4.p1":"有了 DHT + 中继 + 链上托管，","road.f4.p2":" process 收缩为一个种子节点 —— 网络无需任何单点即可运行。",
+  "tech.kicker":"技术","tech.h2":"为边缘而生。","tech.p1":"数据平面协议（帧、握手、对话哈希）定义在","tech.p2":"。提供方将","tech.p3":"指向任何兼容 OpenAI 或 Anthropic 的端点；mesh 只转发消费方加密的内容。",
+  "start.kicker":"开始使用","start.h2":"三条命令运行一个节点。","start.p":"克隆仓库、安装、启动无头服务器。将任何消费方指向节点的 HTTPS URL。",
+  "start.cta.h2":"运行你自己的节点。","start.cta.sub":"第一个公共节点已上线。用三条命令把你的节点加入 mesh —— 并把任何消费方（WorkBuddy、你自己的 agent 或 OpenAI-bridge）连接上去。","start.btn1":"在 GitHub 克隆","start.btn2":"阅读架构",
+  "faq.kicker":"问题","faq.h2":"常见问题。","faq.q1":"我的提示词对 mesh 运营方安全吗？","faq.a1.1":"是的。mesh 只转发","faq.a1.em":"密文","faq.a1.2":"。每个会话用临时 P-256 ECDH 加绑定钱包的 Ed25519 绑定签名作密钥，经 HKDF 导出为 AES-256-GCM 密钥。运营方只持有中继，别无其他 —— 它真无法解开你的提示词。",
+  "faq.q2":"如果提供方中途离线怎么办？","faq.a2":"托管在结算前保留资金。如果一个调用在调用超期内保持 IN_CALL，服务器的孤儿清扫器会将消费方还原为 FUNDED 并记录放弃的调用 —— 所以即使提供方挂了，也不会泄露支付。",
+  "faq.q3":"消费需要钱包吗？","faq.a3.1":"是的 —— 一个 Ed25519 钱包。在","faq.a3.2":"模式，一个无历史余额的钱包会在首次验证登录后自动入账 100 USDT，让你免费试用 mesh。在","faq.a3.3":"（主网）你存入真实的 USDT 到托管中。",
+  "faq.q4":"提供方如何获得支付？","faq.a4":"每次调用，token 按消费方的锁来计量，并在对话哈希检查通过后结算给提供方。定价按每千输入/输出 token 计微-USDT，含最低费用和保证金；提供方声明的容差（默认 ±5%）限定计量。",
+  "faq.q5":"网络现在真的去中心化了？","faq.a5":"数据平面已经是（P2P + E2EE，无中心解密）。控制平面今天是轻量中心化的 —— 一个 Express 节点做目录 + 信令 + 托管。v2 路线图用 libp2p DHT + 中继 + 链上托管取代它，使中心进程缩小为一个种子节点。",
+  "foot.brand":"开放点对点 AI 算力共享。加密数据平面、USDT 托管结算，以及一个正迈向 DHT 的目录。","foot.h1":"产品","foot.l1":"工作原理","foot.l2":"架构","foot.l3":"在线节点","foot.l4":"技术栈","foot.h2":"节点","foot.l5":"部署你的","foot.l6":"FAQ","foot.h3":"端点","foot.oss":"—— 开源。","foot.sim":"· 首个公共节点在线",
+  "pinging":"测试中…","status.on":"节点在线 · ","status.s":"个 listing","status.off":"无法连接","status.failed":"失败",
+  "toast.on":"节点在线 · ","toast.s":"个 listing","toast.off":"无法连接节点: ",
+  "list.found":"→ 找到 ","list.s":"个","list.none":"→ 暂无 listing（添加一个提供方）"
+ },
+ fr:{
+  "nav.how":"Principe","nav.node":"Nœud actif","nav.arch":"Architecture","nav.faq":"FAQ","nav.code":"Obtenir le code",
+  "themeLight":"☀ Clair","themeDark":"🌙 Sombre",
+  "hero.tagline":"Nœud public en ligne","hero.h1a":"Partager le calcul IA","hero.h1b":"pair à pair","hero.h1c":"settled en USDT.",
+  "hero.lede":"MeshLLM est un réseau sans permission de nœuds GPU. Les fournisseurs prêtent du calcul, les consommateurs réservent des modèles au token, et chaque appel est atomiquement settled sur Solana — via un plan de données chiffré de bout en bout. Aucun intermédiaire ne voit votre prompt.",
+  "hero.p1":"Plan de données E2EE","hero.p2":"P2P + relais","hero.p3":"Escrow USDT","hero.action1":"Déployer un nœud","hero.action2":"Comment ça marche","hero.copy":"Chaque nœud est un cas extrême. Votre prompt ne touche jamais l'opérateur.",
+  "prob.kicker":"Le problème résolu","prob.h2":"L'inférence IA ne devrait pas être un jardin clos.","prob.p":"Chaque inférence est coûteuse, chaque fournisseur est une frontière de confiance. MeshLLM transforme les GPU inactifs en marché, met un escrow entre acheteur et vendeur, et garde le plan de données privé de bout en bout.",
+  "feat.t1":"Déscentralisé","feat.h1":"Mesh sans permission","feat.p1":"Tout nœud avec un portefeuille et un GPU peut s'inscrire. Les fournisseurs publient des annonces ; les consommateurs les découvrent via un annuaire adressé par contenu. Aucune partie ne contrôle qui peut calculer.",
+  "feat.t2":"Chiffré","feat.h2":"Plan de données E2EE","feat.p2":"Chaque session génère sa propre clé AES-256-GCM à partir d'ECDH P-256 éphémère et d'Ed25519 lié au portefeuille. La plateforme ne relaie que le chiffré — elle ne voit jamais ton prompt ni ta réponse.",
+  "feat.t3":"Settled","feat.h3":"Escrow USDT","feat.p3":"FUND → IN_CALL → SETTLE_WINDOW → SETTLED. La machine à états d'escrow retient les fonds avant l'appel et settle à l'aube des tokens mesurés. Aucun appel échoué, aucune confiance nécessaire.",
+  "how.kicker":"Le cycle","how.h2":"Quatre étapes. Zéro confiance au milieu.","how.p":"Un appel passe par les mêmes quatre étapes — découverte, escrow, inférence chiffrée, settlement.",
+  "how.f1.h":"Découvrir","how.f1.p1":"Le consommateur interroge l'annuaire pour un modèle (p. ex.","how.f1.p2":"). Les annonces sont adressées par contenu et signées, donc infalsifiables. Le consommateur choisit un fournisseur accessible.",
+  "how.f2.h":"Financer l'escrow","how.f2.p1":"Le consommateur verrouille la fee attendue + caution dans la machine à états d'escrow. L'état passe à","how.f2.p2":". Si l'appel échoue, les fonds sont remboursés, pas perdus.",
+  "how.f3.h":"Lancer l'E2EE","how.f3.p":"Le signalement ouvre un canal de données chiffré (P2P direct ou via un relais). Les prompts partent vers le GPU du fournisseur ; les réponses sont streaming — tout est chiffré, clavier par session.",
+  "how.f4.h":"Settler","how.f4.p1":"Le fournisseur soumet un reçu d'utilisation. L'escrow vérifie contre l'hachage de la transcription et passe à","how.f4.p2":"， libérant le paiement au fournisseur on-chain.",
+  "arch.kicker":"La structure","arch.h2":"Trois plans, proprement séparés.","arch.c1":"Plan de données — P2P + E2EE","arch.a1":"Consommateur (navigateur / app nœud)","arch.a2":"Canal E2EE — AES-256-GCM","arch.a3":"Nœud fournisseur (GPU)","arch.d1":"reléé uniquement sous forme de chiffré",
+  "arch.c2":"Plan de contrôle — léger aujourd'hui","arch.b1":"Annuaire","arch.b2":"Signalet / relais","arch.b3":"Machine à états d'escrow","arch.d2":"Settlement",
+  "arch.c3":"Plan de settlement — Solana USDT","arch.n1":"mesh-escrow (programme Anchor)","arch.n2":"USDT (devnet → mainnet)","arch.n3":"Portefeuilles (Ed25519)",
+  "node.kicker":"Prouvez-le","node.h2":"Un nœud public, en train de tourner.","node.p1":"C'est le premier nœud public mesh — un vrai serveur sur l'internet. Cliquez sur «Ping» pour récupérer","node.p2a":", ","node.p2b":", et ","node.p3":" end-points via HTTPS.",
+  "node.btn":"⟳ Tester le nœud public","node.status":"idle — cliquez sur ping",
+  "road.kicker":"Roadmap — vers la décentralisation","road.h2":"Le centre de contrôle d'aujourd'hui → rien pour demain.","road.f1.h":"Annuaire → DHT","road.f1.p":"L'annuaire REST unique devient Kademlia libp2p + gossip. Les annonces sont déjà adressées par contenu et signées — à l'épreuve du détournement sans serveur central.",
+  "road.f2.h":"Signalet → libp2p + relais","road.f2.p":"Les pièces WS passent au P2P direct avec un petit pool de relais pour NAT ; l'E2EE est agnostic du transport, donc il s'insère directement.",
+  "road.f3.h":"Escrow → on-chain","road.f3.p1":"Le ledger sim devient le vrai programme Anchor mesh-escrow sur Solana. La chaîne","road.f3.em":"est","road.f3.p2":" le machine à états décentralisé.","road.f4.h":"Le nœud devient optionnel","road.f4.p1":"Avec DHT + relais + escrow on-chain, le","road.f4.p2":" processus se réduit à un nœud de seed — le réseau tourne sans aucun point unique.",
+  "tech.kicker":"Tech","tech.h2":"Conçu pour l'edge.","tech.p1":"Le protocole du plan de données (frames, handshake, hachage de transcription) est défini dans","tech.p2":". Les fournisseurs pointent","tech.p3":" vers tout endpoint compatible OpenAI ou Anthropic ; le mesh ne relaie que ce que le consommateur chiffre.",
+  "start.kicker":"Commencez","start.h2":"Trois commandes pour faire tourner un nœud.","start.p":"Clonez le dépôt, installez, et lancez le serveur sans interface. Pointez n'importe quel consommateur vers l'URL HTTPS du nœud.",
+  "start.cta.h2":"Faites tourner votre propre nœud.","start.cta.sub":"Le premier nœud public est en ligne. Ajoutez le vôtre au mesh en trois commandes — et connectez n'importe quel consommateur (WorkBuddy, votre propre agent, ou l'OpenAI-bridge) dessus.","start.btn1":"Cloner sur GitHub","start.btn2":"Lire l'architecture",
+  "faq.kicker":"Questions","faq.h2":"FAQ.","faq.q1":"Est-ce que mon prompt est en sécurité face à l'opérateur mesh ?","faq.a1.1":"Oui. Le mesh ne relaie que","faq.a1.em":"le chiffré","faq.a1.2":". Chaque session est clavier par ECDH P-256 éphémère plus des signatures de liaison Ed25519 liées au portefeuille, puis dérivé en HKDF vers une clé AES-256-GCM. L'opérateur ne tient que le relais et rien d'autre — il ne peut littéralement pas déchiffrer votre prompt.",
+  "faq.q2":"Que se passe-t-il si le fournisseur passe en hors-ligne mid-appel ?","faq.a2":"L'escrow retient les fonds jusqu'au settlement. Si un appel reste IN_CALL plus longtemps que l'expiration, le reaper d'orphelins du serveur retourne le consommateur à FUNDED et enregistre l'appel abandonné — donc aucun paiement n'est perdu quand un fournisseur meurt.",
+  "faq.q3":"Faut-il un portefeuille pour consommer ?","faq.a3.1":"Oui — un portefeuille Ed25519. Dans","faq.a3.2":"mode, un portefeuille sans solde antérieur est crédité automatiquement 100 USDT au premier login vérifié, pour que vous puissiez tester le mesh gratuitement. Dans","faq.a3.3":" (mainnet) vous déposez des USDT réels dans l'escrow.",
+  "faq.q4":"Comment les fournisseurs sont-ils payés ?","faq.a4":"Par appel, les tokens sont comptés contre le verrouillage du consommateur et settled au fournisseur après que la vérification de l'hachage de transcription passe. La tarification est par 1k tokens d'entrée/sortie en micro-USDT, avec une fee minimale et une caution ; la tolérance déclarée du fournisseur (défaut ±5%) borne le comptage.",
+  "faq.q5":"Le réseau est-il vraiment décentralisé aujourd'hui ?","faq.a5":"Le plan de données l'est déjà (P2P + E2EE, pas de décodage central). Le plan de contrôle est aujourd'hui léger et centré — un nœud Express faisant annuaire + signalet + escrow. La roadmap v2 le remplace par Kademlia libp2p DHT + relais + escrow on-chain, pour que le processus central se réduise à un seul nœud de seed.",
+  "foot.brand":"Partage open pair à pair du calcul IA. Plan de données chiffré, settlement par escrow USDT, et un annuaire en voie vers la DHT.","foot.h1":"Produit","foot.l1":"Comment ça marche","foot.l2":"Architecture","foot.l3":"Nœud actif","foot.l4":"Tech","foot.h2":"Nœud","foot.l5":"Déployez le vôtre","foot.l6":"FAQ","foot.h3":"Endpoints","foot.oss":"— open source.","foot.sim":"· Premier nœud public en ligne",
+  "pinging":"test en cours…","status.on":"nœud en ligne · ","status.s":"annonce(s)","status.off":"indisponible","status.failed":"échec",
+  "toast.on":"Nœud en ligne · ","toast.s":"annonce(s)","toast.off":"Nœud indisponible : ",
+  "list.found":"→ ", "list.s":"annonce(s)", "list.none":"→ aucune annonce (ajoutez un fournisseur)"
+ }
+};
+
+/* ================= i18n engine ================= */
+var LANG_CODE={"en":"en","zh":"zh-CN","fr":"fr"};
+var currentLang="en";
+function detectLang(){
+  var saved;
+  try{ saved=localStorage.getItem("mesh-lang"); }catch(e){}
+  if(saved && LANGS[saved]) return saved;
+  var nav=navigator.language||"";
+  var n=nav.toLowerCase();
+  if(n.indexOf("zh")>=0) return "zh";
+  if(n.indexOf("fr")>=0) return "fr";
+  return "en";
+}
+function tr(key){
+  var t=LANGS[currentLang]||LANGS.en;
+  if(t&&t[key]!=null) return t[key];
+  var e=LANGS.en;
+  return e&&e[key]!=null ? e[key] : key;
+}
+function applyI18n(){
+  var html=document.documentElement;
+  html.setAttribute("lang",LANG_CODE[currentLang]||"en");
+  var t=LANGS[currentLang]||LANGS.en;
+  document.querySelectorAll("[data-i18n]").forEach(function(el){
+    var key=el.getAttribute("data-i18n");
+    var val=t[key];
+    if(val!==null && val!==undefined){ el.textContent=val; }
+  });
+  setThemeBtn();
+}
+function setThemeBtn(){
+  var btn=document.getElementById("theme-toggle"); if(!btn) return;
+  var light=(document.documentElement.getAttribute("data-theme")||"dark")==="light";
+  btn.textContent=tr(light?"themeLight":"themeDark");
+}
+function setLang(lang){
+  if(LANGS[lang]){
+    currentLang=lang;
+    applyI18n();
+    var sel=document.getElementById("lang-select"); if(sel) sel.value=lang;
+    try{ localStorage.setItem("mesh-lang",lang); }catch(e){}
+  }
+}
+(function(){
+  var langSel=document.getElementById("lang-select");
+  if(langSel){ langSel.addEventListener("change",function(){ setLang(langSel.value); }); }
+  currentLang=detectLang();
+  var sel=document.getElementById("lang-select"); if(sel) sel.value=currentLang;
+  applyI18n();
+})();
+
+/* ================= theme ================= */
+(function(){
+  var btn=document.getElementById("theme-toggle");
+  var html=document.documentElement;
+  function apply(t){ html.setAttribute("data-theme",t); }
+  btn.addEventListener("click",function(){
+    var t=html.getAttribute("data-theme")==="dark"?"light":"dark";
+    apply(t);
+    try{localStorage.setItem("mesh-theme",t);}catch(e){}
+    setThemeBtn();
+  });
+  try{
+    var s=localStorage.getItem("mesh-theme");
+    if(s){ apply(s); setThemeBtn(); } else { apply("dark"); setThemeBtn(); }
+  }catch(e){ apply("dark"); setThemeBtn(); }
+})();
+
+/* ================= scroll reveal ================= */
+(function(){
+  var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target)}})},{threshold:.12});
+  document.querySelectorAll(".rv").forEach(function(el){io.observe(el)});
+})();
+
+/* ================= FAQ ================= */
+document.querySelectorAll(".faq-q").forEach(function(q){
+  q.addEventListener("click",function(){
+    q.closest(".faq-item").classList.toggle("open");
+  });
+});
+
+/* ================= back to top ================= */
+(function(){
+  var a=document.getElementById("backtop");
+  window.addEventListener("scroll",function(){ a.style.display=window.scrollY>500?"inline-block":"none"; },{passive:true});
+})();
+
+/* ================= toast ================= */
+var toastTimer;
+function toast(msg,color){
+  var t=document.getElementById("toast");
+  t.textContent=msg; t.style.borderColor=color||"var(--accent)";
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){ t.classList.remove("show"); },2600);
+}
+
+/* ================= ping the public node ================= */
+var NODE="https://68.64.183.89:4011";
+var chip=document.getElementById("status-chip");
+var statusText=document.getElementById("status-text");
+function runPing(){
+  statusText.textContent=tr("pinging");
+  chip.className="status off";
+  Promise.all([
+    fetch(NODE+"/health",{mode:"cors"}).then(function(r){return r.json()}),
+    fetch(NODE+"/config",{mode:"cors"}).then(function(r){return r.json()}),
+    fetch(NODE+"/listings",{mode:"cors"}).then(function(r){return r.json()})
+  ]).then(function(res){
+    var h=res[0],c=res[1],l=res[2];
+    document.getElementById("health-ts").textContent=(h&&h.ts)?String(h.ts):"…";
+    var usdt=(c&&c.usdtMint)?String(c.usdtMint).slice(-6):"n/a";
+    var out=document.getElementById("cfg-out");
+    out.innerHTML='<span class="url">rpc='+((c&&c.rpcUrl)||"n/a")+'</span> · <span class="key">usdt '+usdt+'</span> · <span class="ok">settleMode='+((c&&c.settleMode)||"n/a")+'</span>';
+    var listings=(l&&Array.isArray(l.listings))?l.listings.length:0;
+    var lo=document.getElementById("list-out");
+    lo.textContent = listings>0 ? tr("list.found")+listings+tr("list.s") : tr("list.none");
+    statusText.textContent = listings>0 ? tr("status.on")+listings+tr("status.s") : tr("node.status");
+    chip.className="status on";
+    toast(tr("toast.on")+listings+tr("toast.s"),"var(--good)");
+  }).catch(function(e){
+    statusText.textContent = tr("status.off")+" · "+(e.name||tr("status.failed"));
+    chip.className="status off";
+    toast(tr("toast.off")+(e.message||tr("status.failed")),"var(--bad)");
+  });
+}
+document.getElementById("ping-btn").addEventListener("click",runPing);
+setTimeout(function(){try{runPing()}catch(e){}},800);
+document.getElementById("year").textContent=new Date().getFullYear();
+</script>
+</body>
+</html>

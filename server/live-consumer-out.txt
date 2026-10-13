@@ -1,0 +1,1 @@
+C:\Users\Administrator\.workbuddy-ai\binaries\PortableGit\versions\1.2.0\bin\bash.exe: line 1: C:/Users/Administrator/.workbuddy-ai/binaries/node/versions/22.22.2-3/node.exe: No such file or directory

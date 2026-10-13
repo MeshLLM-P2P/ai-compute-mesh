@@ -1,0 +1,16 @@
+{
+  "name": "@mesh/agent",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@mesh/shared": "*",
+    "bs58": "^4.0.1",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.18.0"
+  }
+}

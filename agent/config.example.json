@@ -1,0 +1,12 @@
+{
+  "server": "192.168.2.108:4011",
+  "tls": true,
+  "caCert": "../server/tls/cert.pem",
+  "wallet": "./wallet.json",
+  "listings": [
+    { "listingId": "<listingId-hex>", "apiKey": "" }
+  ],
+  "heartbeatSec": 30,
+  "probeSec": 30,
+  "probeFailThreshold": 2
+}

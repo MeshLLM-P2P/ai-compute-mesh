@@ -1,0 +1,23 @@
+{
+  "name": "@mesh/server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@mesh/shared": "*",
+    "@solana/web3.js": "^1.98.0",
+    "bs58": "^4.0.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "node-forge": "^1.4.0"
+  }
+}

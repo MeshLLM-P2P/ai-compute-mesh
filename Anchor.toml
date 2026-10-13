@@ -1,0 +1,18 @@
+# MeshLLM Anchor workspace config
+[toolchain]
+channel = "stable"
+
+[features]
+seeds = true
+skip-lint = false
+
+[programs.devnet]
+# Replace with the deployed program id after `anchor build` on devnet.
+mesh_escrow = "11111111111111111111111111111111"
+
+[provider]
+cluster = "https://api.devnet.solana.com"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = ""

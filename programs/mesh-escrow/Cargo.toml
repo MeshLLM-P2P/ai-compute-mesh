@@ -1,0 +1,21 @@
+[package]
+name = "mesh-escrow"
+version = "0.1.0"
+description = "MeshLLM per-call USDT escrow: fund/beginCall/receipt/settle/refund/dispute/resolve state machine"
+edition = "2021"
+publish = []
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "mesh_escrow"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+test-bpf = []
+
+[dependencies]
+anchor-lang = "0.30.0"
+anchor-spl = { version = "0.30.0", features = ["associated_token"] }
+borsh = "0.10.3"

@@ -1,0 +1,19 @@
+{
+  "name": "@mesh/shared",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/protocol.js",
+  "exports": {
+    "./protocol": "./src/protocol.js",
+    "./e2ee": "./src/e2ee.js",
+    "./signal": "./src/signal.js",
+    "./channel": "./src/channel.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.9.7",
+    "tweetnacl": "^1.0.3"
+  }
+}

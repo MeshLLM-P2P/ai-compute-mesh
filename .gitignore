@@ -1,0 +1,50 @@
+# ---- 依赖与构建产物 ----
+node_modules/
+dist/
+build/
+out/
+
+# Rust 构建产物
+programs/mesh-escrow/target/
+**/target/
+
+# ---- 服务器运行态数据(模拟账本/日志) ----
+server/data.json
+server/data.json.tmp
+server/*.log
+*.log
+.DS_Store
+
+# ---- 密钥与凭据: 绝不提交 ----
+# 钱包私钥
+agent/wallet.json
+agent/wallet*
+bridge/wallet.json
+**/wallet.json
+
+# 真实 agent 配置(含 apiKey / 服务器地址 / caCert)
+agent/config.json
+agent/config.json.bak*
+**/*.bak*
+
+# TLS 密钥(自签证书 key 是私钥)
+server/tls/key.pem
+server/tls/*.pem
+server/tls/*.key
+server/tls/private*
+
+# 其它 pem/证书/密钥
+certs/*.pem
+certs/*.key
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# 环境变量
+.env
+.env.*
+*.env
+# WorkBuddy 工作数据目录
+.workbuddy-ai/
+.workbuddy/

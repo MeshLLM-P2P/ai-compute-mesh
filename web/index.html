@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MeshLLM — AI 算力共享网络</title>
+    <style>
+      :root {
+        --bg: #0b0e14;
+        --panel: #131824;
+        --panel2: #1a2130;
+        --line: #232c3d;
+        --text: #e6ebf2;
+        --muted: #8b96a8;
+        --accent: #4f8cff;
+        --ok: #34c98e;
+        --warn: #f5a623;
+        --err: #ef5d5d;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        font-size: 14px;
+      }
+      a { color: var(--accent); text-decoration: none; }
+      button {
+        background: var(--accent);
+        border: none;
+        color: #fff;
+        border-radius: 8px;
+        padding: 8px 14px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: default; }
+      button.ghost {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--text);
+      }
+      button.danger { background: var(--err); }
+      input, select, textarea {
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 13px;
+        width: 100%;
+      }
+      label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+      .muted { color: var(--muted); }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px 16px;
+        margin-bottom: 12px;
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .badge.online { background: rgba(52, 201, 142, 0.15); color: var(--ok); }
+      .badge.offline { background: rgba(139, 150, 168, 0.15); color: var(--muted); }
+      .badge.state { background: rgba(79, 140, 255, 0.15); color: var(--accent); }
+      .pill { background: var(--panel2); border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+      pre.chat {
+        background: #0d1119;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+        max-height: 320px;
+        overflow: auto;
+        white-space: pre-wrap;
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 12.5px;
+        line-height: 1.55;
+      }
+      .tabs { display: flex; gap: 4px; margin: 14px 0; }
+      .tabs button { background: transparent; color: var(--muted); border: 1px solid transparent; }
+      .tabs button.active { background: var(--panel); color: var(--text); border-color: var(--line); }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+      table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+      th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+      th { color: var(--muted); font-weight: 600; }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+      .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px 40px; }
+      h1 { font-size: 18px; margin: 16px 0 4px; }
+      h2 { font-size: 15px; margin: 18px 0 8px; }
+      h3 { font-size: 13.5px; margin: 12px 0 6px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

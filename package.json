@@ -1,0 +1,24 @@
+{
+  "name": "ai-compute-mesh",
+  "private": true,
+  "version": "0.1.0",
+  "description": "MeshLLM - P2P AI compute sharing platform with Solana USDT settlement",
+  "workspaces": [
+    "shared",
+    "server",
+    "web",
+    "agent"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "test": "npm run test -w shared && npm run test -w server",
+    "start": "npm run dev",
+    "setup": "npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  }
+}
