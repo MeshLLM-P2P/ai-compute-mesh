@@ -96,6 +96,24 @@ app.post('/autostart', auth.requireSession, (req, res, next) => {
   }
 })
 
+// ---- network mode (测试网 / 实网) ---------------------------------------
+// 登录页的切换按钮需要知道服务器当前实际运行哪种结算模式。
+// settleMode: sim=测试网(模拟结算) / devnet=测试网(Solana devnet 真实转账) / mainnet=实网
+function modeLabel(m) {
+  if (m === 'sim') return { label: '测试网 · 模拟结算', short: '测试网' }
+  if (m === 'devnet') return { label: '测试网 · Solana devnet', short: '测试网' }
+  if (m === 'mainnet') return { label: '实网 · Solana mainnet', short: '实网' }
+  return { label: m, short: m }
+}
+app.get('/network', (req, res) => {
+  res.json({
+    settleMode: CONFIG.settleMode,
+    mode: modeLabel(CONFIG.settleMode),
+    rpcUrl: CONFIG.rpcUrl,
+    usdtMint: CONFIG.usdtMint,
+  })
+})
+
 // ---- wallet login -------------------------------------------------------
 app.get('/nonce', (req, res) => {
   const wallet = typeof req.query.wallet === 'string' ? req.query.wallet : ''
@@ -115,7 +133,8 @@ app.post('/verify', (req, res) => {
       return o
     })
   }
-  res.json({ session: r.session })
+  // 登录响应附带服务端当前结算模式,登录页据此判断所选网络与真实模式是否一致
+  res.json({ session: r.session, settleMode: CONFIG.settleMode })
 })
 
 // ---- directory ------------------------------------------------------------

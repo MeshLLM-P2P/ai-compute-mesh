@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useState, useEffect } from 'react'
 import { api, setSession } from './api.js'
 import { connectWallet, shortAddr, DEMO_KEY } from './wallet.js'
 import { utf8, b64encode } from '@mesh/shared/protocol'
@@ -20,6 +20,18 @@ export default function App() {
   const [logging, setLogging] = useState(false)
   const [tab, setTab] = useState('market')
   const [log, setLog] = useState([])
+  // 网络选择: 测试网/实网。实际结算模式由服务端 MESH_SETTLE_MODE 决定,
+  // 前端按钮用于"选择要连的网"并校验当前服务器是否匹配。
+  const [netChoice, setNetChoice] = useState('test')          // 'test' | 'main'
+  const [netInfo, setNetInfo] = useState(null)                // /network 响应
+  const [netMatch, setNetMatch] = useState(null)              // 登录时校验结果: null|true|false
+
+  // 页面加载时查询服务器当前真实结算模式,作为选择器的默认参照
+  useEffect(() => {
+    api('/network')
+      .then((d) => setNetInfo(d))
+      .catch(() => setNetInfo({ error: '查询失败' }))
+  }, [])
 
   const pushLog = useCallback((m) => {
     const line = new Date().toLocaleTimeString() + '  ' + m
@@ -33,13 +45,17 @@ export default function App() {
       const w = await connectWallet()
       const { nonce } = await api('/nonce?wallet=' + encodeURIComponent(w.address))
       const sigB64 = b64encode(await w.signMessage(utf8(nonce)))
-      const { session } = await api('/verify', {
+      const { session, settleMode } = await api('/verify', {
         method: 'POST',
         body: { wallet: w.address, signature: sigB64 },
       })
       setSession(session)
       setWallet(w)
-      pushLog('登录成功 (' + w.name + '): ' + shortAddr(w.address))
+      // 校验所选网络与服务端真实结算模式是否一致
+      const serverIsTest = settleMode === 'sim' || settleMode === 'devnet' || !settleMode
+      const match = netChoice === 'test' ? serverIsTest : settleMode === 'mainnet'
+      setNetMatch(match)
+      pushLog('登录成功 (' + w.name + '): ' + shortAddr(w.address) + (match ? ' · 网络匹配' : ' · 网络不一致'))
     } catch (e) {
       setLoginErr('登录失败: ' + e.message)
     } finally {
@@ -85,6 +101,82 @@ export default function App() {
           <br />2. Consumer 经平台数据通道(WS /dc)与 Provider 建立会话,应用层 E2E 加密(P-256 ECDH → HKDF → AES-256-GCM)。
           <br />3. 每次调用结束后 Provider 对回执(代币数 + 转录哈希)签名,双方双签触发 Solana USDT 托管结算。
           <br />4. 平台服务器只做目录 / 信令 / 密文中继 / 托管账本,推理数据对平台始终为密文。
+        </div>
+
+        {/* ---------- 网络选择: 测试网 / 实网 ---------- */}
+        <div className="card" style={{ marginTop: 18, textAlign: 'left', fontSize: 13, lineHeight: 1.8 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
+            选择网络
+            {netInfo && <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}> 服务器实际: {netInfo.mode && netInfo.mode.label}</span>}
+          </div>
+          <div className="row" style={{ gap: 12 }}>
+            <button
+              className="net-opt"
+              onClick={() => setNetChoice('test')}
+              style={{
+                flex: 1,
+                background: netChoice === 'test' ? 'var(--accent)' : 'var(--panel2)',
+                border: '1px solid ' + (netChoice === 'test' ? 'var(--accent)' : 'var(--line)'),
+                color: netChoice === 'test' ? '#fff' : 'var(--text)',
+                fontSize: 13,
+                padding: '10px 12px',
+                borderRadius: 8,
+                cursor: 'pointer',
+              }}
+            >
+              测试网
+              <span style={{ display: 'block', fontSize: 11, opacity: 0.8, marginTop: 2 }}>
+                模拟结算(免费,自动充值 100 USDT)
+              </span>
+            </button>
+            <button
+              className="net-opt"
+              onClick={() => setNetChoice('main')}
+              style={{
+                flex: 1,
+                background: netChoice === 'main' ? 'var(--accent)' : 'var(--panel2)',
+                border: '1px solid ' + (netChoice === 'main' ? 'var(--accent)' : 'var(--line)'),
+                color: netChoice === 'main' ? '#fff' : 'var(--text)',
+                fontSize: 13,
+                padding: '10px 12px',
+                borderRadius: 8,
+                cursor: 'pointer',
+              }}
+            >
+              实网
+              <span style={{ display: 'block', fontSize: 11, opacity: 0.8, marginTop: 2 }}>
+                Solana mainnet(真实 USDT 结算)
+              </span>
+            </button>
+          </div>
+          <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.7, color: netInfo?.error ? 'var(--err)' : 'var(--muted)' }}>
+            {netInfo?.error ? (
+              <span style={{ color: 'var(--err)' }}>{netInfo.error}</span>
+            ) : (
+              <>
+                结算模式由服务端启动方式决定(<code style={{ color: 'var(--text)', fontSize: 11 }}>MESH_SETTLE_MODE</code> 变量,取值
+                <code style={{ color: 'var(--text)', fontSize: 11 }}>sim</code>/<code style={{ color: 'var(--text)', fontSize: 11 }}>devnet</code>/<code style={{ color: 'var(--text)', fontSize: 11 }}>mainnet</code>),重启 server 才能生效。
+                {netMatch !== null && (
+                  <>
+                    <br />
+                    当前 {netInfo.mode && netInfo.mode.label}:
+                    {netMatch
+                      ? <span style={{ color: 'var(--ok)' }}>✓ 所选网络与服务器一致</span>
+                      : <span style={{ color: 'var(--warn)' }}>△ 所选网络与服务器不一致(结算将沿用服务器当前模式)</span>}
+                  </>
+                )}
+                {netMatch === false && (
+                  <>
+                    <br />
+                    需切换: 停止 server,改
+                    <code style={{ color: 'var(--text)', fontSize: 11 }}>MESH_SETTLE_MODE</code>
+                    后重新
+                    <code style={{ color: 'var(--text)', fontSize: 11 }}>npm run dev</code>。
+                  </>
+                )}
+              </>
+            )}
+          </div>
         </div>
         <button onClick={login} disabled={logging} style={{ marginTop: 18, padding: '12px 28px', fontSize: 15 }}>
           {logging ? '正在登录…' : '用钱包登录'}
