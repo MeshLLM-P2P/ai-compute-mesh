@@ -31,28 +31,46 @@ echo  ====== MeshLLM one-click launcher ======
 echo   Project : %cd%
 echo.
 
-rem ---------- 1. Node / npm check ----------
+rem ---------- 1. Locate npm (try PATH, then standard install dirs) ----------
+set "NPM_CMD=npm"
 where npm >nul 2>nul
-if errorlevel 1 (
-    echo [error] Node.js / npm not found. Install Node.js 20+ first:
-    echo         https://nodejs.org   (tick "Add to PATH" during install)
+if errorlevel 0 (
+    set "NPM_OK=1"
+) else (
+    if exist "C:\Program Files\nodejs\npm.cmd" (
+        set "NPM_CMD=C:\Program Files\nodejs\npm.cmd"
+        set "NPM_OK=1"
+    ) else if exist "C:\Program Files (x86)\nodejs\npm.cmd" (
+        set "NPM_CMD=C:\Program Files (x86)\nodejs\npm.cmd"
+        set "NPM_OK=1"
+    )
+)
+echo [step1] locating npm... >> "%LOG%"
+
+if not defined NPM_OK (
     echo.
-    echo   Then re-run this file.
+    echo  [ERROR] 找不到 Node.js / npm。窗口会停在这里, 请按任意键关闭。
+    echo.
+    echo          解决方法: 安装 Node.js (LTS, 20+, 64-bit)   https://nodejs.org/download
+    echo                  安装时默认勾选 "Add to PATH" 即可。
+    echo.
+    echo          装好后: 关闭本窗口 -> 重新双击本文件。
+    echo                  (可在 cmd 里输入  'npm -v'  确认已生效)
+    echo.
+    echo          详细原因: 见  start.bat.log
+    echo.
     pause
     exit /b 1
 )
-set "NODE_VER="
-for /f "tokens=1" %%V in ('node -v 2^>nul') do set "NODE_VER=%%V"
-echo [info] Node.js !NODE_VER!   npm OK
-echo [step1] node=!NODE_VER! npm OK >> "%LOG%"
-echo. >> "%LOG%" 2>nul
+echo [info] npm found: %NPM_CMD%
+echo [step1] npm=!NPM_CMD! OK >> "%LOG%"
 
 rem ---------- 2. install dependencies (first run only) ----------
 if not exist node_modules (
     echo [setup] First run - installing dependencies (one-time, may take a while)...
     echo.
     echo   (stderr goes to start.bat.log)
-    call npm install 2>> "%LOG%"
+    call "%NPM_CMD%" install 2>> "%LOG%"
     if errorlevel 1 (
         echo [error] npm install failed. Check network / npm cache.
         echo  [error] details in start.bat.log
@@ -88,7 +106,7 @@ echo.
 echo       Press  Ctrl+C  to stop.
 echo.
 echo [run] %date% %time% starting: npm run dev >> "%LOG%"
-call npm run dev 2>> "%LOG%"
+call "%NPM_CMD%" run dev 2>> "%LOG%"
 set "rc=!errorlevel!"
 echo [end] %date% %time% npm run dev exit=!rc! >> "%LOG%"
 
