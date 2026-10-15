@@ -6,7 +6,15 @@ import bs58 from 'bs58'
 
 export const DEMO_KEY = 'meshllm-demo-key-v1'
 
-export async function connectWallet() {
+// 是否有真实 Solana 钱包(Phantom)可用
+export function hasRealWallet() {
+  const p = window.solana?.Phantom?.solana
+  return !!p
+}
+
+// 连接钱包。real=true 时强制要求真实钱包(Phantom),
+// 无真实钱包则抛出 NEED_REAL_WALLET 错误,不再回退 demo 钱包。
+export async function connectWallet({ real = false } = {}) {
   const phantom = window.solana?.Phantom?.solana
   if (phantom) {
     const resp = await phantom.connect()
@@ -19,6 +27,12 @@ export async function connectWallet() {
         return new Uint8Array(sig)
       },
     }
+  }
+  if (real) {
+    const e = new Error('NEED_REAL_WALLET')
+    e.message = '实网需先连接真实钱包。请安装 Phantom 钱包并在浏览器中连接。'
+    e.code = 'NEED_REAL_WALLET'
+    throw e
   }
   // demo wallet
   let raw = null

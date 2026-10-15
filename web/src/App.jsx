@@ -42,7 +42,7 @@ export default function App() {
     setLogging(true)
     setLoginErr(null)
     try {
-      const w = await connectWallet()
+      const w = await connectWallet({ real: netChoice === 'main' })
       const { nonce } = await api('/nonce?wallet=' + encodeURIComponent(w.address))
       const sigB64 = b64encode(await w.signMessage(utf8(nonce)))
       const { session, settleMode } = await api('/verify', {
@@ -57,7 +57,15 @@ export default function App() {
       setNetMatch(match)
       pushLog('登录成功 (' + w.name + '): ' + shortAddr(w.address) + (match ? ' · 网络匹配' : ' · 网络不一致'))
     } catch (e) {
-      setLoginErr('登录失败: ' + e.message)
+      let msg = '登录失败: ' + (e.message || String(e))
+      // 实网但未连接真实钱包 -> 给出明确指引
+      if (e.code === 'NEED_REAL_WALLET') {
+        msg =
+          '⚠ 选择「实网」需先连接真实钱包。\n' +
+          e.message + '\n' +
+          '安装 Phantom 钱包并连接后重试。'
+      }
+      setLoginErr(msg)
     } finally {
       setLogging(false)
     }
