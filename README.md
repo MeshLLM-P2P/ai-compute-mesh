@@ -16,6 +16,7 @@ ai-compute-mesh/
 ├── server/                   # @mesh/server:目录 + 钱包登录 + WS 信令 + /dc 密文中继 + escrow 模拟账本 + mock LLM
 ├── web/                      # @mesh/web:React 前端(市场 / Provider 面板 / 结算账户)
 ├── agent/                    # @mesh/agent:无头 Node Provider 守护进程(方案 C,7×24 在线)
+├── bridge/                   # @mesh/bridge:OpenAI 兼容桥(/v1/chat/completions),让外部 AI Agent 接入
 └── programs/mesh-escrow/     # Anchor 托管程序源码(M2,需 Anchor 工具链构建)
 ```
 
@@ -109,6 +110,92 @@ npm run dev            # 同时启动 server(:4011)与 web(:5173)
   `agent/examples/live-consumer.js`)。
 - **提供方 Agent**(无头 Node 守护进程,方案 C,已交付):见下节
   "Headless Node Agent"。
+
+## WorkBuddy / AI Agent 接入桥(OpenAI 兼容,`bridge/`)
+
+想让 **WorkBuddy 这类外部 AI Agent**(任意 OpenAI 客户端) 直接当 consumer
+消费你 MeshLLM 算力市场的模型,而无需自己实现 E2EE 钱包/托管流程,用 `bridge/`
+桥。它对外暴露标准 **OpenAI `/v1/chat/completions` + `/v1/models`** 接口,
+内部自动完成 MeshLLM 完整 consumer 链路:钱包登录 → 在线 listing 选模型 →
+`fund` 入金 → 信令 `call` → `/dc` kx 握手 + 加密推理 → 回执验签 →
+`settle-fast` 双签结算。
+
+### 启动桥
+
+```bash
+cd ai-compute-mesh
+node bridge/server.js
+# [bridge] listening on http://0.0.0.0:4021 (OpenAI 兼容) -> MeshLLM auto-listing
+# [bridge] consumer wallet=xxxx...
+```
+
+配置 `bridge/config.json`:
+
+```json
+{
+  "server": "127.0.0.1:4011",      // MeshLLM 平台服务器
+  "ws": "wss://127.0.0.1:4011",    // 信令 + 数据通道
+  "port": 4021,                     // 桥对外端口
+  "wallet": "./wallet.json",        // 桥自己的 consumer 钱包
+  "listing": "",                    // 固定 listing ID;留空则自动选第一个在线 listing
+  "fundRaw": 1000000,               // 首次登录入金额(微USDT,1000000 = 10 USDT)
+  "timeoutSec": 200                 // 单次调用超时(秒)
+}
+```
+
+> 注意:桥是 **HTTP**(非 HTTPS),本地局域网可直连。跨网络请放在可达的内网/
+> 代理后,或自行加 TLS 前置。
+
+### 在 WorkBuddy 里添加自定义模型
+
+WorkBuddy → **设置** → **模型** → 右上角 ** + ** → 选「**自定义 / Custom**」:
+
+| 字段 | 值 | 说明 |
+|---|---|---|
+| 提供商 | **自定义 / Custom** | 不是内置提供商 |
+| 接口地址 | `http://192.168.2.108:4021/v1/chat/completions` | **必须填完整地址**,以 `/v1/chat/completions` 结尾(不是根地址) |
+| API Key | 任意非空占位(如 `meshllm`) | 桥当前无鉴权,填占位即可 |
+| 模型名称 | 如 `Ternary-Bonsai-2-27B-ninfer-v3-8001` | 当前在线 listing 的模型 ID;以 `/v1/models` 返回为准 |
+
+勾选项:只勾**工具调用**(按需);**不勾图片输入**(当前模型只支持 text);
+思考模式按需。
+
+### 保存后切换模型
+
+**保存 ≠ 切换**。配完保存到 WorkBuddy,再到对话页点**输入框右下角的当前
+模型名**,在列表里**选中**你刚加的模型(名字旁出现勾选标记才算生效),
+否则会一直用旧模型。
+
+### 连接验证
+
+```bash
+# 看可用模型
+curl http://127.0.0.1:4021/v1/models
+
+# 发一条对话(非流式)
+curl -X POST http://127.0.0.1:4021/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"Ternary-Bonsai-2-27B-ninfer-v3-8001",
+       "messages":[{"role":"user","content":"测试: 你好,请简短回应\"你好\""}]}'
+```
+
+返回形如:
+
+```json
+{"id":"chatcmpl-bridge-33f62340d1ec8fcb",
+ "choices":[{"index":0,"message":{"role":"assistant",
+    "content":"你好!很高兴见到你。..."}}],
+ "usage":{"prompt_tokens":1,"completion_tokens":7,"total_tokens":8}}
+```
+
+### 结算与网络说明
+
+- 桥用自身钱包(`bridge/wallet.json`)跟平台做 **E2EE 调用 + Solana USDT
+  托管结算**。每次对话完整走完 `login → fund → E2EE → 验签 → settle`。
+- 模型列表实时跟随**在线 provider 发布的 listing**。换 provider / 换 listing
+  后模型 ID 会变,WorkBuddy 报 `model not found` 时去模型配置里换成
+  `/v1/models` 返回的最新 ID。
+- **重启后桥不会自动起**:重启后需在项目目录重新跑 `node bridge/server.js`。
 
 ## Headless Node Agent(方案 C)
 
