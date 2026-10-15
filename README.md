@@ -259,12 +259,53 @@ node agent/examples/live-consumer.js   # 真实链路参考实现(需 agent 守�
                                  #   不属于 npm test)
 ```
 
+## 推荐返利(Referral Rewards)
+
+分享你的钱包地址,新用户经 `?ref=` 首登时绑定到该推荐人。每次消费者
+**实际结算付款**后,推荐人就按比例返一笔返利。
+
+- **分享码 = 推荐人本人钱包地址**(默认,无需预注册;任何登录过的钱包都可分享)。
+- **绑定** 发生在 `POST /verify` 首登时;已有绑定则不覆盖(返回 `already-bound`)。
+- **默认推荐人 = 平台收款钱包**：首次登录**未填有效分享码**(无码/无效/填了自己的地址)
+  时，消费者默认绑定到 `platformCollectionWallet`，平台据此获得该用户的返利。
+  填了有效他人分享码才绑定到该分享码。
+- **返利额 = floor(消费者该笔付款额 × 费率%)**，每次结算触发。**无累计上限**
+  （`referralCapRaw` 默认 `0`=不限额）。
+- **数据来源** 只取 `payRaw`(消费者实际付款额)：`settleFast` / `settleWindow` /
+  `resolve` 三条结算路径的 payRaw>0 才发；全额退款(payRaw=0)是 provider
+  责任，消费者未付，不发。
+
+### 配置(`server/src/config.js`，env 覆盖)
+
+| 字段 | env | 默认 | 含义 |
+|------|-----|------|------|
+| `referralRate` | `MESH_REFERRAL_RATE` | `5` | 每次结算返利百分比(整数,5=5%) |
+| `referralCapRaw` | `MESH_REFERRAL_CAP_RAW` | `0` | 累计返利上限(微-USDT);`0`=**无上限** |
+| `platformCollectionWallet` | `MESH_PLATFORM_COLLECTION_WALLET` | `9BSx7r2Vo6XVXU5Ew4TFopZsKCEo9L3MszKRGwmZ7FPu` | 默认推荐人(首登未填分享码时消费者绑定到该地址，平台拿返利) |
+
+> 返利速率 `referralRate>0` 即生效。devnet 模式下返利入账是平台补贴，需改为真实链上转账。
+
+### 数据模型(模拟账本)
+
+| 存储键 | 结构 |
+|--------|------|
+| `referrals[consumerWallet]` | `{ referrer, refCode, refRate, refRateCapRaw, refTs, defaultPlatform }` — `defaultPlatform`=由平台默认绑定(未填分享码) |
+| `rewards[referrerWallet]` | `{ raw, earned, cap, rate }` — `raw`=已付累计、`earned`=累计贡献 |
+
+### 前端
+
+登录页有「推荐返利」卡片：粘贴推荐人钱包地址/分享码，登录时自动绑定该分享码；
+**未填**分享码时默认推荐人=平台收款钱包。分享链接形如 `...#ref=<wallet>`，打开会
+自动填充推荐码输入框。已登录时顶栏显示 `返利 X USDT`、拉来的用户数及「分享」按钮。
+
 ## API 摘要(server :4011)
 
 | 方法/路径 | 说明 |
 |-----------|------|
-| `GET /health` `GET /config` | 健康检查 / 运行配置 |
-| `GET /nonce?wallet=` + `POST /verify` | 钱包登录(签名 nonce 换 session) |
+| `GET /health` `GET /config` | 健康检查 / 运行配置(/config 含 `referral:{ratePct,capRaw,active,noCap,platformCollectionWallet}`) |
+| `GET /nonce?wallet=` + `POST /verify` | 钱包登录(签名 nonce 换 session;首登自动绑定推荐关系——带 `?ref=` 绑该码,未填则默认绑平台收款钱包) |
+| `GET /referral/code/:code` | 校验分享码有效 |
+| `GET /referral`(需 session) | 本人推荐信息(分享码、本人累计已得、是否被推荐、`defaultPlatform` 是否平台默认) |
 | `GET /listings` / `GET /listings/:id` | 目录(可 `?online=1&provider=&model=&stats=1`) |
 | `POST /listings` / `DELETE /listings/:id` | 发布(签名) / 删除(提供方本人) |
 | `POST /presence` | 在线心跳(TTL 120s) |

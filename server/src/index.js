@@ -63,8 +63,46 @@ app.get('/config', (req, res) =>
     settleWindowSec: CONFIG.settleWindowSec,
     callTimeoutSec: CONFIG.callTimeoutSec,
     defaultBondRaw: CONFIG.defaultBondRaw,
+    // 推荐返利配置: 分享码=本人钱包地址; 每笔结算按 ratePct% 返(无上限,
+    // 0=无上限)。无分享码首登默认推荐人=平台收款钱包。
+    referral: {
+      ratePct: CONFIG.referralRate,
+      capRaw: CONFIG.referralCapRaw,
+      active: CONFIG.referralRate > 0,
+      // 默认推荐人(首登未填分享码时消费者绑定到该地址,平台拿返利)
+      platformCollectionWallet: CONFIG.platformCollectionWallet,
+      noCap: CONFIG.referralCapRaw === 0,
+    },
   })
 )
+
+// ---- referral (推荐返利) --------------------------------------------------
+// 分享码 = 推荐人本人钱包地址。绑定发生在 /verify 首次登录且 ?ref= 有效时。
+app.get('/referral/code/:code', (req, res) => {
+  const code = req.params.code
+  if (typeof code !== 'string' || code.length < 20)
+    return res.status(400).json({ error: 'bad-code' })
+  const info = escrow.getReferralInfo(code)
+  res.json({
+    code,
+    valid: true,
+    referrer: code,
+    ratePct: info.ratePct,
+    capRaw: info.capRaw,
+  })
+})
+app.get('/referral', auth.requireSession, (req, res) => {
+  const info = escrow.getReferralInfo(req.wallet)
+  // 本人作为推荐人: 累计已得返利 + 拉到的消费者累计贡献
+  const ledger = escrow.getReferralLedger(req.wallet)
+  // 累计拉来的消费者数量(本人 referrer 的 referrals)
+  let referredCount = 0
+  const refMap = store.get('referrals', {})
+  for (const v of Object.values(refMap)) {
+    if (v && v.referrer === req.wallet) referredCount += 1
+  }
+  res.json({ ...info, referredCount, raw: ledger.raw, earned: ledger.earned })
+})
 
 // ---- agent config.json / 开机自启 (网页配置页) ----------------------------
 // 只读写本机 agent 的配置文件;未知字段合并保留。开机自启写 Windows 启动文件夹,
@@ -133,8 +171,16 @@ app.post('/verify', (req, res) => {
       return o
     })
   }
+  // 推荐绑定: 首登总是绑定到推荐关系 — 填了有效分享码则绑该码,
+  //   否则(无码/无效/空)默认绑到平台收款钱包(platformCollectionWallet)。
+  // 仅当平台开启返利(referralRate>0) 时才绑定。
+  const refCode = typeof req.query.ref === 'string' ? req.query.ref : ''
+  let refInfo = { error: 'n/a' }
+  if (CONFIG.referralRate > 0) {
+    refInfo = escrow.recordReferral(wallet, refCode, CONFIG)
+  }
   // 登录响应附带服务端当前结算模式,登录页据此判断所选网络与真实模式是否一致
-  res.json({ session: r.session, settleMode: CONFIG.settleMode })
+  res.json({ session: r.session, settleMode: CONFIG.settleMode, referral: refInfo })
 })
 
 // ---- directory ------------------------------------------------------------

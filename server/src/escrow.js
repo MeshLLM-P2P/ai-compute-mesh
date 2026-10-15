@@ -89,6 +89,186 @@ export function createEscrow(store, cfg, getListing, recordCall) {
     }))
   }
 
+  // ---- referral rewards (推荐返利) ------------------------------------------
+// 数据模型:
+//   referrals[consumerWallet] = { referrer, refCode, refRate, refTs }
+//     记录"该消费者由谁推荐而来(绑定时间/当时费率)"。分享码默认=本人钱包地址,
+//     无需预注册——任何登录过的钱包都可被分享,绑定时即把 refCode 记为该消费者
+//     的 referrer。
+//   rewards[referrerWallet]   = { raw, earned, cap, rate }
+//     累计已付返利(微-USDT,raw)、累计应得(earned,含超 cap 部分)、上限与费率
+//     (绑定时的 cfg 快照,后续 cfg 改动不影响历史绑定)。
+//
+// 返利额 = floor(该笔 consumer 实际付款额 * refRate%)。累计 raw 达到 cap 后,
+// 该消费者继续结算不再给推荐人发钱,但超额部分仍计入 earned(用于统计"该推荐人
+// 拉来的消费者累计贡献")。
+//
+// 绑定在 /verify 首次登录时发生(?ref= 携带分享码且本人尚无 referrer)。
+// 结算点:settleFast / settleWindow / resolve(仅 payRaw>0)。
+
+  function isWallet(s) {
+    if (!s || !String(s).trim()) return false
+    try {
+      new PublicKey(String(s).trim())
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function getReferral(consumer) {
+    return store.get('referrals', {})[consumer] || null
+  }
+
+  // 绑定推荐关系(仅供本人尚无 referrer 的 /verify 首次登录调用,见 index.js)
+  // 规则:
+  //   - 有效 refCode(合法钱包地址、非本人、非平台) → 绑定到该分享码
+  //   - 无 refCode / refCode 无效 / 空 → 默认绑定到「平台收款钱包」
+  //   - 已有绑定 → 不覆盖(already-bound)
+  // 校验顺序: 已有绑定 → 格式(空/无效) → 自推 → 成功。
+  // 返回 { bound, referrer, refCode, rate, capRaw, defaultPlatform }
+  function recordReferral(consumer, refCode, cfg) {
+    if (getReferral(consumer)) return { bound: false, error: 'already-bound' }
+    const rate = Number(cfg.referralRate || 0)
+    const capRaw = Number(cfg.referralCapRaw || 0)
+    // 平台收款钱包(默认推荐人);允许 env 覆盖
+    const platformWallet = (cfg.platformCollectionWallet || cfg.referralDefaultReferrer || '')
+    const defaultPlatform = !!platformWallet
+    const refCodeClean = (refCode || '').trim()
+    // 若给了有效且非本人、非平台的有效分享码 → 用它;否则 → 默认平台
+    let ref = ''
+    let isDefault = false
+    const isCodeValid = isWallet(refCodeClean)
+    if (isCodeValid && refCodeClean !== consumer && refCodeClean !== platformWallet) {
+      ref = refCodeClean
+      // 显式有效码: 非默认平台
+    } else {
+      // 无码 / 无效 / 自推 / 平台码 都 → 默认平台
+      ref = platformWallet
+      isDefault = defaultPlatform
+    }
+    if (!ref) {
+      // 无有效码且无平台钱包配置 → 不绑定
+      return { bound: false, error: 'no-ref-code', isDefault: isDefault }
+    }
+    store.update('referrals', (m) => {
+      m = m || {}
+      m[consumer] = {
+        referrer: ref,
+        refCode: ref,
+        refRate: rate,
+        refRateCapRaw: capRaw,
+        refTs: now(),
+        defaultPlatform: isDefault,
+      }
+      return m
+    })
+    return { bound: true, referrer: ref, refCode: ref, rate, capRaw, defaultPlatform: isDefault }
+  }
+
+  // 获取本人推荐信息(用于 GET /referral)
+  function getReferralInfo(wallet) {
+    const my = getReferral(wallet)
+    const rate = Number(cfg.referralRate || 0)
+    const capRaw = Number(cfg.referralCapRaw || 0)
+    const reward = store.get('rewards', {})[wallet] || { raw: 0, earned: 0, cap: capRaw, rate: rate }
+    return {
+      wallet,
+      // 分享码=本人钱包地址;任何 wallet 都可分享,无需预注册
+      shareCode: wallet,
+      ratePct: rate,
+      capRaw,
+      // 本人作为推荐人的累计(已被推荐进来的消费者贡献)
+      earnedRaw: reward.raw,
+      earned: reward.earned,
+      // 本人"作为消费者"被谁推荐
+      referrer: my ? my.referrer : null,
+      refRate: my ? Number(my.refRate || rate) : null,
+      boundAsConsumer: !!my,
+      // 是否由平台默认绑定(未填分享码)
+      defaultPlatform: my ? !!my.defaultPlatform : false,
+    }
+  }
+
+  // 在结算时触发推荐返利。amountRaw = consumer 本笔实际付款额。
+  // 返回统一形状 { referrer, amountRaw, rewardRaw, earnedRaw, capRaw }:
+  //   referrer: 推荐人钱包地址(或 null 表示无/未绑定);
+  //   rewardRaw: 本笔应得(未封顶)金额;
+  //   earnedRaw: 本笔实际入账(受 cap 封顶后真正给到的钱);
+  //   capRaw: 本绑定时的累计上限(0=不限额)。
+  function payoutReferral(consumer, amountRaw, cfg) {
+    const capRaw0 = Number(cfg.referralCapRaw ?? 0)
+    const ref = getReferral(consumer)
+    if (!ref || !ref.referrer)
+      return { referrer: null, amountRaw, rewardRaw: 0, earnedRaw: 0, capRaw: capRaw0 }
+    const rate = Number(ref.refRate ?? 0)
+    // 无 rate(0) 或 无实际付款额: 直接短路, 不发
+    if (rate <= 0 || amountRaw <= 0)
+      return { referrer: ref.referrer, amountRaw, rewardRaw: 0, earnedRaw: 0, capRaw: capRaw0 }
+    // capRaw: 用绑定时的快照(refRateCapRaw); 0 表示"不限额"
+    const capRaw = Number(ref.refRateCapRaw ?? cfg.referralCapRaw ?? 0)
+    // 累计已付给该推荐人 + 本笔新增, 按 cap 封顶
+    const before = store.get('rewards', {})[ref.referrer] || { raw: 0, earned: 0, cap: capRaw, rate }
+    const candidate = Math.floor((amountRaw * rate) / 100)
+    const newRaw = before.raw + candidate
+    // cap>0 才封顶; cap==0(或负) 表示不限额
+    const cap = capRaw > 0 ? Math.min(newRaw, capRaw) : newRaw
+    const extra = cap - before.raw
+    const out = {
+      referrer: ref.referrer,
+      amountRaw,
+      rewardRaw: candidate,
+      earnedRaw: extra,
+      capRaw,
+    }
+    if (candidate > 0) {
+      store.update('rewards', (m) => {
+        m = m || {}
+        const r = m[ref.referrer] || { raw: 0, earned: 0, cap: capRaw, rate }
+        r.raw = cap
+        r.earned += candidate
+        m[ref.referrer] = r
+        return m
+      })
+    }
+    // 返利入账(仅 sim 账本,微-USDT)。devnet 模式:此处应改为真实
+    // 链上转账(escrow 已扣除 consumer 额,返利另取平台补贴额度),
+    // 当前 sim 纯记入 balances。
+    if (extra > 0) credit(ref.referrer, extra)
+    // [P1 可观测] 记录到最近一笔对应 listing 的 call 日志,便于审计
+    const escrows = store.get('escrows', {})
+    let target = null
+    for (const e of Object.values(escrows)) {
+      if (e.consumer === consumer && e.tx && e.tx.txId) {
+        target = e.listingId
+        break
+      }
+    }
+    if (target) {
+      recordCall(target, {
+        ts: now(),
+        event: 'referral-reward',
+        consumer,
+        referrer: ref.referrer,
+        amountRaw,
+        rewardRaw: candidate,
+      })
+    }
+    return out
+  }
+
+  // 查询推荐人视角累计(用于 UI 展示"本人推荐的累计返利")
+  function getReferralLedger(wallet) {
+    return {
+      ...store.get('rewards', {})[wallet] || {
+        raw: 0,
+        earned: 0,
+        cap: cfg.referralCapRaw || 0,
+        rate: cfg.referralRate || 0,
+      },
+    }
+  }
+
   // ---- consumer reputation (anti-freeloading, item 2) ---------------------
   // E2EE 下 server 无法验证"交付",只能观测 escrow 状态迁移,因此用状态事件
   // 近似消费者的"结算完成率",供 provider 拒单参考:
@@ -349,6 +529,7 @@ export function createEscrow(store, cfg, getListing, recordCall) {
     credit(consumer, -e.tx.amountRaw)
     credit(listing.provider, e.tx.providerRaw)
     addPlatformFees(e.tx.fees)
+    payoutReferral(consumer, e.tx.amountRaw, cfg)
     recordCall(listingId, {
       ts: now(),
       event: 'settle',
@@ -412,6 +593,7 @@ export function createEscrow(store, cfg, getListing, recordCall) {
     credit(row.consumer, -amountRaw)
     credit(listing.provider, fees.providerRaw)
     addPlatformFees(fees.parts)
+    payoutReferral(row.consumer, amountRaw, cfg)
     recordCall(listingId, {
       ts: now(),
       event: 'settle-window',
@@ -579,6 +761,9 @@ export function createEscrow(store, cfg, getListing, recordCall) {
     if (resolvedTx.payRaw > 0) {
       noteEvent(consumer, 'settled')
       noteProviderEvent(listing.provider, 'settled')
+      // 仅消费者实际付款(payRaw)才触发推荐返利;全额退款是
+      // provider 责任,消费者未付,不该给推荐人返利
+      payoutReferral(consumer, resolvedTx.payRaw, cfg)
     } else {
       // 全额退款 = provider 责任:计 provider 败诉 + 自动 slash 押金
       // (罚没额 = 冻结额,封顶押金余额;罚没部分计入平台保障基金)
@@ -659,6 +844,12 @@ export function createEscrow(store, cfg, getListing, recordCall) {
     reputation,
     providerReputation,
     noteEvent,
+    // ---- 推荐返利(外部 API 入口)
+    recordReferral,
+    getReferral,
+    getReferralInfo,
+    payoutReferral,
+    getReferralLedger,
   }
 }
 

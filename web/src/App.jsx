@@ -2,6 +2,7 @@ import React, { useCallback, useState, useEffect } from 'react'
 import { api, setSession } from './api.js'
 import { connectWallet, shortAddr, DEMO_KEY } from './wallet.js'
 import { utf8, b64encode } from '@mesh/shared/protocol'
+import { fmtUsd, shortHash } from './util.js'
 import Market from './pages/Market.jsx'
 import ProviderPanel from './pages/ProviderPanel.jsx'
 import EscrowPanel from './pages/EscrowPanel.jsx'
@@ -25,12 +26,43 @@ export default function App() {
   const [netChoice, setNetChoice] = useState('test')          // 'test' | 'main'
   const [netInfo, setNetInfo] = useState(null)                // /network 响应
   const [netMatch, setNetMatch] = useState(null)              // 登录时校验结果: null|true|false
+  const [refCode, setRefCode] = useState('')                  // 登录页粘贴的推荐分享码
+  const [refInfo, setRefInfo] = useState(null)                // /verify 返回的 referral 绑定结果
+  const [myReferral, setMyReferral] = useState(null)          // 登录后 /referral 本人信息
+  const [refCfg, setRefCfg] = useState(null)                  // /config.referral 返利参数
+
+  const shareUrl =
+    wallet
+      ? location.href +
+        '#ref=' +
+        encodeURIComponent(wallet.address)
+      : ''
+  // 粘贴分享码到剪贴板/复制本人分享码
+  const copyShare = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      pushLog('已复制你的分享链接')
+    } catch {
+      pushLog('复制失败(无剪贴板权限)')
+    }
+  }
 
   // 页面加载时查询服务器当前真实结算模式,作为选择器的默认参照
   useEffect(() => {
     api('/network')
       .then((d) => setNetInfo(d))
       .catch(() => setNetInfo({ error: '查询失败' }))
+    api('/config')
+      .then((d) => setRefCfg(d.referral || null))
+      .catch(() => {})
+    // 从分享链接 #ref=<wallet> 自动填充推荐码
+    if (typeof location !== 'undefined') {
+      const hash = location.hash
+      if (hash.startsWith('#ref=')) {
+        const code = decodeURIComponent(hash.slice('#ref='.length))
+        if (code) setRefCode(code)
+      }
+    }
   }, [])
 
   const pushLog = useCallback((m) => {
@@ -45,17 +77,32 @@ export default function App() {
       const w = await connectWallet({ real: netChoice === 'main' })
       const { nonce } = await api('/nonce?wallet=' + encodeURIComponent(w.address))
       const sigB64 = b64encode(await w.signMessage(utf8(nonce)))
-      const { session, settleMode } = await api('/verify', {
-        method: 'POST',
-        body: { wallet: w.address, signature: sigB64 },
-      })
+      const { session, settleMode, referral } = await api(
+        '/verify' + (refCode ? '?ref=' + encodeURIComponent(refCode) : ''),
+        {
+          method: 'POST',
+          body: { wallet: w.address, signature: sigB64 },
+        }
+      )
       setSession(session)
       setWallet(w)
       // 校验所选网络与服务端真实结算模式是否一致
       const serverIsTest = settleMode === 'sim' || settleMode === 'devnet' || !settleMode
       const match = netChoice === 'test' ? serverIsTest : settleMode === 'mainnet'
       setNetMatch(match)
+      // 推荐绑定结果
+      if (referral && referral.bound) {
+        setRefInfo(referral)
+        pushLog('✓ 推荐绑定成功: 由 ' + shortAddr(referral.referrer) + ' 推荐(每结算得 ' + referral.rate + '% 返利)')
+      } else if (refCode && !referral.bound) {
+        pushLog('△ 推荐未绑定(' + (referral.error || '未知原因') + ')。已有绑定则不覆盖。')
+      }
       pushLog('登录成功 (' + w.name + '): ' + shortAddr(w.address) + (match ? ' · 网络匹配' : ' · 网络不一致'))
+      // 加载本人推荐信息(已登录才可读 /referral)
+      try {
+        const r = await api('/referral')
+        setMyReferral(r)
+      } catch {}
     } catch (e) {
       let msg = '登录失败: ' + (e.message || String(e))
       // 实网但未连接真实钱包 -> 给出明确指引
@@ -186,6 +233,54 @@ export default function App() {
             )}
           </div>
         </div>
+        {/* ---------- 推荐返利 (登录前粘贴分享码绑定) ---------- */}
+        <div
+          className="card"
+          style={{ marginTop: 18, textAlign: 'left', fontSize: 13, lineHeight: 1.8 }}
+        >
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
+            推荐返利 <span style={{ opacity: 0.7, fontSize: 12 }}>
+              (分享码 = 推荐人钱包地址,首登时绑定)
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="text"
+              placeholder="粘贴推荐人的钱包地址(可粘贴分享码)"
+              value={refCode}
+              onChange={(e) => setRefCode(e.target.value.trim())}
+              style={{
+              flex: 1,
+              padding: '8px 10px',
+              fontSize: 12,
+              border: '1px solid var(--line)',
+              borderRadius: 6,
+              color: 'var(--text)',
+              background: 'var(--panel2)',
+            }}
+            />
+            {refInfo && (
+              <span style={{ fontSize: 12, color: 'var(--ok)', whiteSpace: 'nowrap' }}>
+                ✓ 已绑定
+              </span>
+            )}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--muted)' }}>
+            {() => {
+              if (!refCfg) return <span>填入分享码后登录即绑定该推荐人,按实际结算额返一定比例。</span>
+              if (!refCfg.active) return <span>本服务器未开启推荐返利(返利速率需 >0)。</span>
+              const capPart = refCfg.noCap
+                ? '无累计上限。'
+                : `累计上限 ${(refCfg.capRaw / 1e6).toFixed(1)} USDT。`
+              return (
+                <span>
+                  填入分享码后登录即绑定该推荐人;每次你结算(按实际付款额)返{' '}
+                  {refCfg.ratePct}% 返利,{capPart}未填分享码时默认推荐人=平台收款钱包(平台拿返利)。
+                </span>
+              )
+            }}
+          </div>
+        </div>
         <button onClick={login} disabled={logging} style={{ marginTop: 18, padding: '12px 28px', fontSize: 15 }}>
           {logging ? '正在登录…' : '用钱包登录'}
         </button>
@@ -206,10 +301,40 @@ export default function App() {
     <div>
       <div className="topbar">
         <div style={{ fontWeight: 700, fontSize: 16 }}>MeshLLM</div>
-        <div className="row">
+        <div className="row" style={{ gap: 10 }}>
           <span className="pill mono" title={wallet.address}>
             {wallet.name} · {shortAddr(wallet.address)}
           </span>
+          {/* 推荐返利: 分享本人链接 + 显示累计已得 */}
+          {myReferral && myReferral.ratePct > 0 && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span
+                className="pill mono"
+                style={{ fontSize: 11, color: 'var(--ok)' }}
+                title={`推荐返利: 每结算返 ${myReferral.ratePct}% (累计已得 ${fmtUsd(myReferral.raw)})`}
+              >
+                返利 {fmtUsd(myReferral.raw)}
+              </span>
+              {myReferral.referredCount > 0 && (
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  拉来 {myReferral.referredCount} 位
+                </span>
+              )}
+              {myReferral.referrer && (
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  ← {shortHash(myReferral.referrer, 6)}
+                </span>
+              )}
+              <button
+                className="ghost"
+                style={{ fontSize: 11, padding: '4px 8px' }}
+                onClick={copyShare}
+                title={shareUrl}
+              >
+                分享
+              </button>
+            </div>
+          )}
           <button className="ghost" onClick={logout}>
             退出
           </button>

@@ -38,4 +38,14 @@ export const CONFIG = {
   // Test accounts (sim ledger): wallets that never had a balance get this credit
   // on first verified login. Only meaningful in settleMode 'sim'.
   testCreditRaw: Number(process.env.MESH_TEST_CREDIT_RAW || 100_000_000), // 100 USDT
+
+  // ---- 推荐返利 (referral reward) -----------------------------------------
+  // referralRate: 每笔结算按消费者实际付款额返给推荐人的百分比(整数),默认 5%。
+  // referralCapRaw: 0 = 无上限。默认 0(不限额)。
+  // platformCollectionWallet: 默认推荐人 = 平台收款钱包。用户首次登录未填分享码
+  //   时,消费者默认绑定到该钱包作"推荐人"(平台从organic用户赚 5%)。
+  referralRate: Number(process.env.MESH_REFERRAL_RATE || 5),
+  referralCapRaw: Number(process.env.MESH_REFERRAL_CAP_RAW || 0),
+  platformCollectionWallet:
+    process.env.MESH_PLATFORM_COLLECTION_WALLET || '9BSx7r2Vo6XVXU5Ew4TFopZsKCEo9L3MszKRGwmZ7FPu',
 }
