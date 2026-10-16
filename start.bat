@@ -204,12 +204,43 @@ if defined NPM_REGISTRY (
 )
 
 rem ---------- 5. install dependencies ----------
+rem  A previously failed install can leave a node_modules folder that exists
+rem  but is missing packages, which then breaks 'npm run dev' with
+rem  'concurrently' is not recognized. Do not trust the folder alone:
+rem  npm writes node_modules\.package-lock.json only when an install
+rem  completes, and the dev script needs node_modules\.bin\concurrently.cmd.
+set "NEED_INSTALL=0"
 if not exist node_modules (
+    set "NEED_INSTALL=1"
+    call :say [setup] no node_modules yet
+) else (
+    if not exist "node_modules\.package-lock.json" (
+        set "NEED_INSTALL=1"
+        call :say [setup] node_modules exists but has no .package-lock.json
+    )
+    if not exist "node_modules\.bin\concurrently.cmd" (
+        set "NEED_INSTALL=1"
+        call :say [setup] node_modules exists but concurrently is missing
+    )
+)
+
+if "!NEED_INSTALL!"=="0" (
+    call :say [setup] node_modules looks complete, install skipped
+) else (
     echo.
-    echo   [setup] First run : installing dependencies. One time only.
-    echo   [setup] This usually takes 1 to 3 minutes. Please wait.
+    echo   [setup] Installing dependencies. This can take 1 to 3 minutes.
     echo   [setup] Full npm output is written to start.bat.log
     echo.
+    if exist node_modules (
+        call :say [setup] removing the broken node_modules first
+        call :cleanup
+        rmdir /s /q node_modules >nul 2>nul
+        if exist node_modules (
+            call :say [setup] WARN node_modules could not be fully removed
+        ) else (
+            call :say [setup] node_modules removed
+        )
+    )
     call :say [setup] npm install BEGIN
     call :npmRun install
     set "IRC=!errorlevel!"
@@ -232,8 +263,9 @@ if not exist node_modules (
         exit /b 3
     )
     call :say [setup] npm install OK
-) else (
-    call :say [setup] node_modules already present, install skipped
+    if not exist "node_modules\.bin\concurrently.cmd" (
+        call :say [setup] WARN concurrently is still missing after install
+    )
 )
 
 rem ---------- 6. ports ----------
