@@ -578,6 +578,14 @@ export default function Market({ wallet, pushLog }) {
                     {p.wallet.slice(0, 4)}…{p.wallet.slice(-4)}
                     <br />
                     <span style={{ fontSize: 11, opacity: 0.6 }}>{shortHash(p.nodeId, 12)}</span>
+                    {p.federated && (
+                      <>
+                        <br />
+                        <span className="badge state" style={{ fontSize: 10.5 }} title={'经 bootstrap 联邦同步,来自 ' + p.origin}>
+                          via {p.origin?.replace(/^https?:\/\//, '')}
+                        </span>
+                      </>
+                    )}
                   </td>
                   <td>
                     {p.models && p.models.length > 0

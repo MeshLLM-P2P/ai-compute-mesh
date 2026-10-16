@@ -10,6 +10,7 @@ import { createStore } from './store.js'
 import { createAuth } from './auth.js'
 import { createDirectory, HttpError } from './directory.js'
 import { createPeers } from './peers.js'
+import { createFederation } from './federation.js'
 import { createEscrow, EscrowError } from './escrow.js'
 import { mockLlmRouter } from './mockllm.js'
 import {
@@ -26,6 +27,7 @@ const store = createStore(CONFIG.dataFile)
 const auth = createAuth(store)
 const directory = await createDirectory(store, CONFIG)
 const peers = createPeers(store, CONFIG)
+const federation = createFederation(store, CONFIG, peers)
 const escrow = createEscrow(store, CONFIG, directory.get, directory.recordCall)
 
 const app = express()
@@ -321,8 +323,8 @@ app.get('/listings/:id/calls', (req, res) => {
 app.post('/peers/join', auth.requireSession, (req, res, next) => {
   try {
     const { nodeId, endpoint, models } = req.body || {}
-    const { peers: online } = peers.join(req.wallet, { nodeId, endpoint, models })
-    res.json({ ok: true, ts: Date.now(), peers: online })
+    peers.join(req.wallet, { nodeId, endpoint, models })
+    res.json({ ok: true, ts: Date.now(), peers: federation.list() })
   } catch (e) {
     next(e)
   }
@@ -346,10 +348,32 @@ app.post('/peers/leave', auth.requireSession, (req, res, next) => {
     next(e)
   }
 })
-// 全网在线节点(公开):市场页"网络节点"区块 + 任何节点发现彼此。
+// 全网在线节点(公开):本地 + 联邦拉取的对端节点(带 origin)。
+// 消费者连任何 bootstrap 都能发现全网节点。
 app.get('/peers', (req, res) => {
-  const online = peers.list()
+  const online = federation.list()
   res.json({ peers: online, total: online.length })
+})
+// ---- federation(bootstrap 联邦配置与状态) -----------------------------------
+app.get('/federation', (req, res) => {
+  res.json({
+    bootstraps: federation.bootstraps(),
+    stored: (store.get('federation', []) || []),
+    pullSec: CONFIG.federationPullSec,
+    self: `http://${CONFIG.host}:${CONFIG.port}`,
+  })
+})
+app.post('/federation', auth.requireSession, async (req, res, next) => {
+  try {
+    const { bootstraps } = req.body || {}
+    federation.setBootstraps(bootstraps)
+    // 立即拉一次并等待完成:配置变更即时生效,响应里带回每个上游的拉取结果
+    // (协议写错/对端 down 会以 ok:false 报告,而不是静默失败)
+    const pulled = await federation.pullOnce()
+    res.json({ bootstraps: federation.bootstraps(), pulled })
+  } catch (e) {
+    next(e)
+  }
 })
 app.delete('/listings/:id', auth.requireSession, (req, res, next) => {
   try {
@@ -1016,8 +1040,13 @@ setInterval(() => {
   }
 }, 60000)
 
+// 启动 bootstrap 联邦:定时拉取对端 /peers 合并进全网视图(unref,不阻塞退出)
+federation.start()
+
 server.listen(CONFIG.port, CONFIG.host, () => {
   console.log(
     `[meshllm] server on ${useTls ? 'https' : 'http'}://${CONFIG.host}:${CONFIG.port} (settleMode=${CONFIG.settleMode}${useTls ? ', tls=self-signed' : ''})`
   )
+  const fed = federation.bootstraps()
+  if (fed.length > 0) console.log(`[meshllm] federation upstreams: ${fed.join(', ')}`)
 })

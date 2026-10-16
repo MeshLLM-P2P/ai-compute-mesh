@@ -34,6 +34,17 @@ export const CONFIG = {
   // "online" through that throttling (the immediate visibilitychange beat
   // restores freshness as soon as the tab is visible again).
   presenceTtlSec: Number(process.env.MESH_PRESENCE_TTL_SEC || 120),
+  // ---- Bootstrap 联邦(节点注册表跨服务器同步) ------------------------------
+  // peerBootstraps: 对等 bootstrap URL(逗号分隔),如
+  //   MESH_PEER_BOOTSTRAPS=https://192.168.2.108:4011,https://192.168.2.174:4011
+  // 本机定时拉取对端 /peers 合并进全网视图(拉取式,无环路)。
+  // 运行时也可经 POST /federation 增删(存 store,与环境变量取并集)。
+  peerBootstraps: process.env.MESH_PEER_BOOTSTRAPS || '',
+  federationPullSec: Number(process.env.MESH_FEDERATION_PULL_SEC || 30),
+  // 自身对外 URL(如 https://192.168.2.108:4011):联邦回环防护用。
+  // 对端 /peers 返回的节点若 origin 等于本 URL,说明是本节点的联邦副本
+  // 被传了回来,跳过不再收录(leave 后不留幽灵节点)。不设 = 禁用防护。
+  selfUrl: process.env.MESH_SELF_URL || '',
   defaultBondRaw: 100_000_000, // 100 USDT in micro-USDT
   // Test accounts (sim ledger): wallets that never had a balance get this credit
   // on first verified login. Only meaningful in settleMode 'sim'.

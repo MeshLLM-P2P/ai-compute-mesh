@@ -15,6 +15,10 @@ export default function ConfigPanel({ wallet, pushLog }) {
   const [info, setInfo] = useState(null)
   const [cfg, setCfg] = useState(null)
   const [auto, setAuto] = useState({ enable: false, startServer: true, startAgent: true, hidden: true })
+  // [bootstrap 联邦] 上游 bootstrap 列表(经 /federation 管理,存服务端)
+  const [fed, setFed] = useState([])
+  const [fedInput, setFedInput] = useState('')
+  const [fedSaving, setFedSaving] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -37,7 +41,27 @@ export default function ConfigPanel({ wallet, pushLog }) {
 
   useEffect(() => {
     load()
+    api('/federation')
+      .then((r) => setFed(r.bootstraps || []))
+      .catch(() => {})
   }, [load])
+
+  // 联邦上游保存:POST /federation(服务端即时生效 + 立即拉取一次)
+  const saveFed = async (urls) => {
+    setFedSaving(true)
+    try {
+      const r = await api('/federation', { method: 'POST', body: { bootstraps: urls } })
+      setFed(r.bootstraps || [])
+      const pulled = (r.pulled || [])
+        .map((p) => `${p.bootstrap}: ${p.ok ? '拉到 ' + p.peers + ' 个节点' : '不可达'}`)
+        .join('; ')
+      pushLog('联邦上游已更新' + (pulled ? '(' + pulled + ')' : ''))
+    } catch (e) {
+      pushLog('联邦上游保存失败: ' + e.message)
+    } finally {
+      setFedSaving(false)
+    }
+  }
 
   const set = (k) => (e) => setCfg((c) => ({ ...c, [k]: e.target.value }))
 
@@ -241,6 +265,54 @@ export default function ConfigPanel({ wallet, pushLog }) {
         )}
         <p className="muted" style={{ fontSize: 12 }}>
           Agent 启动后会自己等服务器就绪(最多 10 分钟),所以两项同时开机启动是安全的。
+        </p>
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>5) Bootstrap 联邦(跨服务器节点发现)</h3>
+        <p className="muted" style={{ fontSize: 12 }}>
+          每台服务器都是独立 bootstrap,节点注册表只存本机。填上对等 bootstrap 的地址后,
+          本机每 30 秒拉取对端的 /peers 合并进全网视图 —— 消费者连任何 bootstrap
+          都能看到所有联邦节点(带来源标记)。无环路、无审批。
+        </p>
+        <div className="row" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
+          {fed.length === 0 && <span className="muted">当前没有配置上游(仅发现本机节点)</span>}
+          {fed.map((u) => (
+            <span key={u} className="badge online mono" style={{ fontSize: 11.5 }}>
+              {u}
+              <button
+                className="ghost"
+                style={{ marginLeft: 6, padding: '0 4px' }}
+                title="移除该上游"
+                onClick={() => saveFed(fed.filter((x) => x !== u))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            value={fedInput}
+            onChange={(e) => setFedInput(e.target.value)}
+            placeholder="如 https://192.168.2.108:4011"
+            style={{ minWidth: 260 }}
+          />
+          <button
+            className="ghost"
+            disabled={fedSaving || !fedInput.trim()}
+            onClick={() => {
+              const u = fedInput.trim().replace(/\/+$/, '')
+              if (u && !fed.includes(u)) saveFed([...fed, u])
+              setFedInput('')
+            }}
+          >
+            添加上游
+          </button>
+        </div>
+        <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+          提示:让两台机器互相看到对方,两台都要把对方的地址加进来(双向同步)。
+          环境变量 MESH_PEER_BOOTSTRAPS 设置的地址会自动并入,不可在此删除。
         </p>
       </div>
     </div>
