@@ -23,14 +23,32 @@ import {
   runBackend,
   cachedTokensOf,
 } from '@mesh/shared/channel'
-import { api, SERVER, SIGNAL_URL, getSession } from './api.js'
+import { api, SERVER, SIGNAL_URL, getSession, makeApi, wsUrlOf } from './api.js'
 
 // ---------- consumer orchestrator ------------------------------------------
 
-export async function startConsumerCall({ listing, wallet, log, onState, onTokens, onReceipt, onError, onClosed }) {
+// [跨 bootstrap 调用] serverBase=null → 全走本地 bootstrap(默认);
+// serverBase=<远程 origin>(如 https://192.168.2.174:4011)+ 远程
+// sessionToken → 信令、/dc 中继、escrow 结算全部连远程 bootstrap。
+// provider agent 零改动:offer 到达远程 lst 房间即正常接单,
+// 它的数据通道/回执也全在自己的 bootstrap 上完成。
+export async function startConsumerCall({
+  listing,
+  wallet,
+  log,
+  onState,
+  onTokens,
+  onReceipt,
+  onError,
+  onClosed,
+  serverBase = null,
+  sessionToken = null,
+}) {
   const sessionId = crypto.randomUUID()
   const params = callParams(listing)
-  const signal = new SignalClient(SIGNAL_URL)
+  const signalUrl = serverBase ? wsUrlOf(serverBase) : SIGNAL_URL
+  const apiFn = serverBase ? makeApi(serverBase, sessionToken).api : api
+  const signal = new SignalClient(signalUrl)
   let ch, kx, keys
   let prompt = ''
   let reply = ''
@@ -95,6 +113,7 @@ export async function startConsumerCall({ listing, wallet, log, onState, onToken
       // 能力(有无 RTCPeerConnection)在 accept 里回选;不回复/旧版本 = relay。
       transport: ['rtc', 'relay'],
     })
+    log('offer sent (transport=rtc,relay),等待 provider accept…')
     // 2) session room on /signal:busy 通知仍走信令房间(控制帧)
     //    [阶段2] 同房间还中转 accept(transport 选择)、fallback(回退)、
     //    sdp/ice(WebRTC 协商) —— 都在 handler 里分发。
@@ -192,10 +211,11 @@ export async function startConsumerCall({ listing, wallet, log, onState, onToken
       for (const f of preKx.splice(0)) kx.handleKx(f)
     }
 
-    // relay 路径:/dc 裸帧中继(join sess 房间,服务器原样转发)
+    // relay 路径:/dc 裸帧中继(join sess 房间,服务器原样转发)。
+    // 跨 bootstrap 调用时 url 指向远程 bootstrap。
     function openRelayChannel() {
       const channel = openDcChannel({
-        url: SIGNAL_URL,
+        url: signalUrl,
         room: 'sess:' + sessionId,
         log: (s) => log('dc: ' + s),
         onFrame: handleFrame,
@@ -429,7 +449,7 @@ export async function startConsumerCall({ listing, wallet, log, onState, onToken
     //    回执经 P2P 到达并不自动上链;漏了这一步 settle-fast 会因行内 receipt=null 崩溃
     //    (01:10 结算失败根因)。已处于 SETTLE_WINDOW 时视为已提交,幂等放过。
     try {
-      await api('/escrow/receipt', {
+      await apiFn('/escrow/receipt', {
         method: 'POST',
         body: { consumer: wallet.address, listingId: listing.id, receipt },
       })
@@ -440,7 +460,7 @@ export async function startConsumerCall({ listing, wallet, log, onState, onToken
     const digest = await receiptDigest(receipt)
     const acceptSig = b64encode(await wallet.signMessage(digest))
     set('settling')
-    const { escrow } = await api('/escrow/settle-fast', {
+    const { escrow } = await apiFn('/escrow/settle-fast', {
       method: 'POST',
       body: {
         consumer: wallet.address,
@@ -549,7 +569,7 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
           if (m.t === 'call') handleCall(m).catch((e) => log('call error: ' + e.message))
         },
       })
-      log('agent online (listening for calls, max ' + maxConcurrent + ' concurrent)')
+      log('agent online (listening for calls, max ' + maxConcurrent + ' concurrent, transport=' + (typeof RTCPeerConnection !== 'undefined' ? 'rtc+relay' : 'relay-only') + ')')
     })
     .catch((e) => log('signal connect failed: ' + e.message))
 
@@ -615,6 +635,8 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
       return
     }
     const consumerPub = bs58.decode(m.consumerPub)
+    // [诊断] offer 是否带 transport 声明:一眼区分 consumer 是新代码还是旧缓存
+    log('call offer received: transport=' + JSON.stringify(m.transport || null))
     activeCount++
     activeSessions.add(sessionId)
     const call = {

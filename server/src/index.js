@@ -195,6 +195,9 @@ app.get('/listings', (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.toLowerCase() : null
   const sort = typeof req.query.sort === 'string' ? req.query.sort : null
   let out = directory.list({ onlyOnline, provider, model })
+  // [跨 bootstrap 发现] 合并联邦拉取的远程在线目录(带 origin=家 bootstrap,
+  // 本地优先去重)。远程 listing 供前端切换 API/信令目标实现跨网调用。
+  out = federation.listings(out)
   // 目录搜索(P3):q 对模型名/后端/供应方做不区分大小写子串匹配
   if (q) {
     out = out.filter((l) => {

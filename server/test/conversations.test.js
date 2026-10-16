@@ -20,7 +20,10 @@ const WS_BASE = 'wss://127.0.0.1:4011'
 const certPath = path.resolve(import.meta.dirname, '..', 'tls', 'cert.pem')
 const ca = fs.existsSync(certPath) ? fs.readFileSync(certPath, 'utf8') : null
 const a = (p, o = {}) => rawApi(BASE, p, { ...o, ca })
-const socketFactory = () => new WebSocket(WS_BASE, { rejectUnauthorized: false })
+// 必须透传 URL:SignalClient 会拼 /signal 路径,服务端 upgrade 分发器
+// 只认 /signal 与 /dc,裸路径连接会被 destroy(工厂忽略参数时 join 永远
+// 等不到 ack —— 2026-10-16 修复的挂起根因)
+const socketFactory = (u) => new WebSocket(u, { rejectUnauthorized: false })
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const timeout = (ms, label) => sleep(ms).then(() => new Error('timeout: ' + label))
 

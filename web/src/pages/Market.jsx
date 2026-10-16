@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { api, getConversation, downloadJson } from '../api.js'
+import { api, getConversation, downloadJson, loginRemote, makeApi } from '../api.js'
 import { startConsumerCall } from '../session.js'
 import CallTimeline from '../timeline.jsx'
 import { calcAmountRaw, splitFees } from '@mesh/shared/protocol'
@@ -93,6 +93,20 @@ export default function Market({ wallet, pushLog }) {
     } catch {}
   }, [])
 
+  // [跨 bootstrap 调用] listing 对应的 API 客户端:
+  // - 本地 listing(federated=false) → 本地 api()
+  // - 联邦远程 listing → 连它的家 bootstrap(origin),登录换取远程 session
+  //   token(缓存复用)。escrow/信令/数据通道全部必须在那一边:
+  //   只有那边同时有 listing store、provider agent 的信令房间与账本。
+  const clientFor = useCallback(
+    async (l) => {
+      if (!l || !l.federated || !l.origin) return api
+      const token = await loginRemote(l.origin, wallet)
+      return makeApi(l.origin, token).api
+    },
+    [wallet]
+  )
+
   const load = useCallback(async () => {
     try {
       const qs = ['online=1', 'stats=1']
@@ -150,36 +164,40 @@ export default function Market({ wallet, pushLog }) {
     return [...arr].sort((a, b) => val(a) - val(b))
   }
 
-  const loadReviews = async (id) => {
+  const loadReviews = async (l) => {
     try {
-      const r = await api('/listings/' + id + '/reviews')
-      setReviews((m) => ({ ...m, [id]: r.reviews || [] }))
+      const c = await clientFor(l)
+      const r = await c('/listings/' + l.id + '/reviews')
+      setReviews((m) => ({ ...m, [l.id]: r.reviews || [] }))
     } catch {}
   }
-  const toggleReviews = (id) => {
+  const toggleReviews = (l) => {
     setOpenReviews((cur) => {
-      const next = cur === id ? null : id
-      if (next) loadReviews(next)
+      const next = cur === l.id ? null : l.id
+      if (next) loadReviews(l)
       return next
     })
   }
-  const postReview = async (id) => {
+  const postReview = async (l) => {
     const text = reviewText.trim()
     if (!text) return
     try {
-      await api('/listings/' + id + '/reviews', { method: 'POST', body: { body: text } })
+      const c = await clientFor(l)
+      await c('/listings/' + l.id + '/reviews', { method: 'POST', body: { body: text } })
       setReviewText('')
-      await loadReviews(id)
+      await loadReviews(l)
       pushLog('留言已提交')
     } catch (e) {
       pushLog('留言失败: ' + e.message)
     }
   }
 
-  // 取消托管:IN_CALL 且未产生回执 → 预留资金立即释放回 FUNDED
+  // 取消托管:IN_CALL 且未产生回执 → 预留资金立即释放回 FUNDED。
+  // 跨 bootstrap 调用时落到远程 bootstrap 的账本上。
   const cancelEscrow = async (listing) => {
     try {
-      const r = await api('/escrow/cancel', {
+      const c = await clientFor(listing)
+      const r = await c('/escrow/cancel', {
         method: 'POST',
         body: { consumer: wallet.address, listingId: listing.id },
       })
@@ -233,18 +251,48 @@ export default function Market({ wallet, pushLog }) {
         }
       })
     try {
-      const full = (await api('/listings/' + l.id)).listing
-      if (!full) throw new Error('listing-not-found')
+      // [跨 bootstrap 调用] 联邦远程 listing(federated+origin=家 bootstrap):
+      // escrow 查询/充值/锁定/结算、信令、数据通道全部连远程 bootstrap ——
+      // 只有那边同时有 listing store、provider agent 信令房间与账本。
+      // provider agent 零改动:offer 到达远程 lst 房间即接单。
+      let apiFn = api
+      let remoteBase = null
+      let remoteToken = null
+      if (l.federated && l.origin) {
+        remoteBase = l.origin
+        remoteToken = await loginRemote(remoteBase, wallet)
+        apiFn = makeApi(remoteBase, remoteToken).api
+        pushLog(
+          '跨 bootstrap 调用:模型位于 ' +
+            remoteBase.replace(/^https?:\/\//, '') +
+            '(托管/信令/数据通道全走对方 bootstrap)'
+        )
+        try {
+          const rb = await apiFn('/me/balance')
+          pushLog(
+            '远程余额 ' +
+              fmtUsd(rb.balanceRaw) +
+              ' · 可用 ' +
+              fmtUsd(rb.availableRaw) +
+              '(测试账户首次登录自动充值 100 USDT)'
+          )
+        } catch {}
+      }
+      const detail = (await apiFn('/listings/' + l.id)).listing
+      if (!detail) throw new Error('listing-not-found')
+      // 远程 listing 的 federated/origin 必须带回 full:cancelEscrow/topUp/
+      // dispute 全靠它决定客户端打本地还是远程
+      const full = l.federated ? { ...detail, federated: true, origin: l.origin } : detail
       // 确保托管账户有余额:按 listing 上限估算最坏费用(输出 maxTokens + 输入
       // context,留 20% 余量),保证任意用量下结算都不会 insufficient-balance
       const need = fundEstimate(full)
       let esc = null
       try {
-        esc = (await api('/escrow?consumer=' + wallet.address + '&listingId=' + l.id)).escrow
+        esc = (await apiFn('/escrow?consumer=' + wallet.address + '&listingId=' + l.id)).escrow
       } catch {}
       if (!esc || esc.state === 'EMPTY' || esc.balanceRaw < need) {
         const amt = need
-        await api('/escrow/fund', {
+        await apiFn('/escrow/fund', {
           method: 'POST',
           body: { consumer: wallet.address, listingId: l.id, amountRaw: amt },
         })
@@ -256,6 +304,9 @@ export default function Market({ wallet, pushLog }) {
       const session = await startConsumerCall({
         listing: full,
         wallet,
+        // [跨 bootstrap] 远程 bootstrap:信令/数据通道/结算全走那边
+        serverBase: remoteBase,
+        sessionToken: remoteToken,
         log: (m) => pushLog('会话: ' + m),
         onState: (st) => {
           setCall((c) => ({ ...c, state: st, listing: c.listing || full }))
@@ -369,7 +420,7 @@ export default function Market({ wallet, pushLog }) {
       // 重试不会撞上 begin-call-not-allowed-in-IN_CALL
       await readyP
       if (callFailed) return
-      await api('/escrow/begin-call', {
+      await apiFn('/escrow/begin-call', {
         method: 'POST',
         body: { consumer: wallet.address, listingId: full.id, sessionId: session.sessionId },
       })
@@ -416,8 +467,9 @@ export default function Market({ wallet, pushLog }) {
     if (!call?.listing) return
     setCall((c) => ({ ...c, acting: true }))
     try {
+      const c = await clientFor(call.listing)
       const amt = fundEstimate(call.listing)
-      await api('/escrow/fund', {
+      await c('/escrow/fund', {
         method: 'POST',
         body: { consumer: wallet.address, listingId: call.listing.id, amountRaw: amt },
       })
@@ -446,7 +498,8 @@ export default function Market({ wallet, pushLog }) {
     if (!call?.session) return
     setCall((c) => ({ ...c, acting: true }))
     try {
-      await api('/escrow/dispute', {
+      const c = await clientFor(call.listing)
+      await c('/escrow/dispute', {
         method: 'POST',
         body: {
           actor: 'consumer',
@@ -496,11 +549,14 @@ export default function Market({ wallet, pushLog }) {
   }
 
   // [P1 可观测] 调用时间线(服务器视角:目录事件 + 数据面 dc 统计),
-  // 打开时自动轮询刷新,会话进行中也能看到实时事件
+  // 打开时自动轮询刷新,会话进行中也能看到实时事件。
+  // 跨 bootstrap 调用时时间线取远程 bootstrap 的服务器视图。
   const loadTimeline = async (listingId, sessionId) => {
     setTl({ listingId, sessionId, loading: true, data: null })
     try {
-      const r = await getConversation(wallet.address, listingId, sessionId || null)
+      const l = call?.listing
+      const c = l && l.id === listingId ? await clientFor(l) : api
+      const r = await getConversation(wallet.address, listingId, sessionId || null, c)
       setTl({ listingId, sessionId, loading: false, data: r })
     } catch (e) {
       pushLog('时间线加载失败: ' + e.message)
@@ -786,6 +842,15 @@ export default function Market({ wallet, pushLog }) {
                 {l.online ? '在线' : '离线'}
               </span>
               {l.status === 'superseded' && <span className="badge offline">已替代</span>}
+              {l.federated && (
+                <span
+                  className="badge state"
+                  style={{ fontSize: 10.5 }}
+                  title={'经 bootstrap 联邦同步,来自 ' + l.origin + '(调用时托管/信令/数据通道全走对方 bootstrap)'}
+                >
+                  via {l.origin?.replace(/^https?:\/\//, '')}
+                </span>
+              )}
             </div>
             <p className="muted" style={{ margin: '6px 0' }}>
               {priceText(l.pricing)}
@@ -808,7 +873,7 @@ export default function Market({ wallet, pushLog }) {
             >
               调用此服务
             </button>
-            <button className="ghost" style={{ marginLeft: 8 }} onClick={() => toggleReviews(l.id)}>
+            <button className="ghost" style={{ marginLeft: 8 }} onClick={() => toggleReviews(l)}>
               评论留言({(reviews[l.id] || []).length})
             </button>
             {openReviews === l.id && (
@@ -833,7 +898,7 @@ export default function Market({ wallet, pushLog }) {
                     placeholder="写个留言(最多 500 字)"
                     maxLength={500}
                   />
-                  <button onClick={() => postReview(l.id)} disabled={!reviewText.trim()}>
+                  <button onClick={() => postReview(l)} disabled={!reviewText.trim()}>
                     提交
                   </button>
                 </div>
