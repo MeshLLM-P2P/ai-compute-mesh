@@ -177,7 +177,33 @@ if defined NPM_VER (
     call :say [step3] using npm-cli.js : !NPM_CLI!
 )
 
-rem ---------- 4. install dependencies ----------
+rem ---------- 4. registry that matches the lockfile ----------
+rem  npm 11.x / 12.x refuse to fetch tarballs when the configured registry
+rem  origin differs from the "resolved" origin stored in package-lock.json
+rem  (npm error code EALLOWREMOTE). The lockfile here points at a mirror,
+rem  so we pass that exact registry to npm and the origins then match.
+set "NPM_REGISTRY="
+if exist package-lock.json (
+    rem  "resolved": "https://HOST/path"  split on / gives token 1 = ...https:
+    rem  and token 2 = HOST, because cmd collapses the double slash.
+    for /f "tokens=2 delims=/" %%H in ('findstr /I /C:"resolved" package-lock.json ^| findstr /I /C:"https://"') do (
+        if not defined NPM_REGISTRY (
+            rem  accept only if it really looks like a host name, has a dot
+            for /f "tokens=1,2 delims=." %%X in ("%%H") do (
+                if not "%%Y"=="" set "NPM_REGISTRY=https://%%H"
+            )
+        )
+    )
+)
+set "NPM_EXTRA="
+if defined NPM_REGISTRY (
+    call :say [setup] lockfile registry : !NPM_REGISTRY!
+    set "NPM_EXTRA=--registry=!NPM_REGISTRY!"
+) else (
+    call :say [setup] no registry found in package-lock.json, using default
+)
+
+rem ---------- 5. install dependencies ----------
 if not exist node_modules (
     echo.
     echo   [setup] First run : installing dependencies. One time only.
@@ -187,6 +213,12 @@ if not exist node_modules (
     call :say [setup] npm install BEGIN
     call :npmRun install
     set "IRC=!errorlevel!"
+    if not "!IRC!"=="0" (
+        call :say [setup] attempt 1 failed, killing stale node processes and retrying
+        call :cleanup
+        call :npmRun install
+        set "IRC=!errorlevel!"
+    )
     if not "!IRC!"=="0" (
         call :say [setup] npm install FAILED with code !IRC!
         echo.
@@ -204,16 +236,18 @@ if not exist node_modules (
     call :say [setup] node_modules already present, install skipped
 )
 
-rem ---------- 5. ports ----------
-call :say [step5] checking ports ...
+rem ---------- 6. ports ----------
+call :say [step6] checking ports ...
 set "FAIL=0"
 call :freePort %PORT_API%
 if "!FAIL!"=="1" exit /b 4
 call :freePort %PORT_WEB%
 if "!FAIL!"=="1" exit /b 4
-call :say [step5] ports ready
+call :say [step6] ports ready
 
-rem ---------- 6. run ----------
+rem ---------- 7. run ----------
+rem  dev does not need the registry override
+set "NPM_EXTRA="
 echo.
 echo   Server / API : http://127.0.0.1:4011
 echo   Web  UI      : http://127.0.0.1:5173
@@ -244,10 +278,10 @@ rem   when npm.cmd is broken. Output goes to the log.
 rem ===================================================================
 set "NRC=0"
 if defined NPM_CLI (
-    call "!NODE_EXE!" "!NPM_CLI!" %* >> "%LOG%" 2>&1
+    call "!NODE_EXE!" "!NPM_CLI!" %* !NPM_EXTRA! >> "%LOG%" 2>&1
     set "NRC=!errorlevel!"
 ) else (
-    call "!NPM_CMD!" %* >> "%LOG%" 2>&1
+    call "!NPM_CMD!" %* !NPM_EXTRA! >> "%LOG%" 2>&1
     set "NRC=!errorlevel!"
 )
 exit /b !NRC!
