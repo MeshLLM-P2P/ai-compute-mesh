@@ -51,37 +51,52 @@ echo   ====== MeshLLM one-click launcher ======
 echo   folder : %CD%
 echo.
 
-rem ---------- 1. find npm ----------
-call :say [step1] looking for npm ...
-set "NPM_CMD=npm"
+rem ---------- 1. locate node.exe ----------
+rem  IMPORTANT : do NOT trust  where npm  here. The WHERE command searches
+rem  the CURRENT DIRECTORY before PATH, so a stray npm.cmd sitting in the
+rem  project folder would win and then look for itself in the wrong place.
+rem  We therefore locate node.exe first and take npm from next to it.
+call :say [step1] looking for node.exe ...
 set "NODE_DIR="
-set "FOUND="
+set "NODE_EXE="
+set "NPM_CMD="
+set "NPM_CLI="
 
-where npm >nul 2>nul
-if not errorlevel 1 (
-    set "FOUND=1"
-)
-
-if not defined FOUND (
-    if exist "C:\Program Files\nodejs\npm.cmd" set "NODE_DIR=C:\Program Files\nodejs"
-    if not defined NODE_DIR if exist "C:\Program Files (x86)\nodejs\npm.cmd" set "NODE_DIR=C:\Program Files (x86)\nodejs"
-    if not defined NODE_DIR if exist "%USERPROFILE%\AppData\Roaming\nvm\npm.cmd" set "NODE_DIR=%USERPROFILE%\AppData\Roaming\nvm"
-    if not defined NODE_DIR if exist "%LOCALAPPDATA%\Programs\nodejs\npm.cmd" set "NODE_DIR=%LOCALAPPDATA%\Programs\nodejs"
-    if not defined NODE_DIR if exist "%USERPROFILE%\AppData\Local\Microsoft\WindowsApps\npm.cmd" set "NODE_DIR=%USERPROFILE%\AppData\Local\Microsoft\WindowsApps"
-)
+if exist "C:\Program Files\nodejs\node.exe" set "NODE_DIR=C:\Program Files\nodejs"
+if not defined NODE_DIR if exist "C:\Program Files (x86)\nodejs\node.exe" set "NODE_DIR=C:\Program Files (x86)\nodejs"
+if not defined NODE_DIR if exist "%USERPROFILE%\AppData\Roaming\nvm\node.exe" set "NODE_DIR=%USERPROFILE%\AppData\Roaming\nvm"
+if not defined NODE_DIR if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" set "NODE_DIR=%LOCALAPPDATA%\Programs\nodejs"
+if not defined NODE_DIR if exist "%USERPROFILE%\AppData\Local\Microsoft\WindowsApps\node.exe" set "NODE_DIR=%USERPROFILE%\AppData\Local\Microsoft\WindowsApps"
 for /d %%D in ("%USERPROFILE%\AppData\Roaming\nvm\v*") do (
-    if not defined NODE_DIR if exist "%%D\npm.cmd" set "NODE_DIR=%%D"
-)
-if defined NODE_DIR (
-    set "NPM_CMD=!NODE_DIR!\npm.cmd"
-    set "FOUND=1"
+    if not defined NODE_DIR if exist "%%D\node.exe" set "NODE_DIR=%%D"
 )
 
-if not defined FOUND (
-    call :say [step1] npm was NOT found anywhere
+rem this folder with a trailing backslash, used to reject a node.exe
+rem that lives inside the project itself
+set "CDSLASH="
+for %%Q in ("%CD%\.") do set "CDSLASH=%%~dpQ"
+
+if not defined NODE_DIR (
+    for /f "delims=" %%N in ('where node 2^>nul') do (
+        if not defined NODE_DIR if not "%%~dpN"=="!CDSLASH!" set "NODE_DIR=%%~dpN"
+    )
+)
+
+rem ---- diagnostics : show everything the machine can see ----
+call :say [step1] folder with backslash : !CDSLASH!
+call :say [step1] where npm sees :
+for /f "delims=" %%W in ('where npm 2^>nul') do call :say [step1]     npm at %%W
+call :say [step1] where node sees :
+for /f "delims=" %%W in ('where node 2^>nul') do call :say [step1]     node at %%W
+if exist "%CD%\npm.cmd" call :say [step1] WARN a stray npm.cmd sits in the project folder
+if exist "%CD%\npm.bat" call :say [step1] WARN a stray npm.bat sits in the project folder
+if exist "%CD%\node.exe" call :say [step1] WARN a stray node.exe sits in the project folder
+
+if not defined NODE_DIR (
+    call :say [step1] node.exe was NOT found anywhere
     echo.
     echo   +--------------------------------------------------------------+
-    echo   +  ERROR : Node.js / npm was not found on this computer        +
+    echo   +  ERROR : Node.js was not found on this computer              +
     echo   +                                                              +
     echo   +  Do this, in order :                                         +
     echo   +   1. Download Node.js LTS 64-bit :  https://nodejs.org        +
@@ -94,16 +109,14 @@ if not defined FOUND (
     echo.
     exit /b 2
 )
-call :say [step1] npm found : !NPM_CMD!
+call :say [step1] NODE_DIR : !NODE_DIR!
+set "NODE_EXE=!NODE_DIR!\node.exe"
+call :say [step1] NODE_EXE : !NODE_EXE!
 
 rem ---------- 2. node version ----------
 call :say [step2] checking node version ...
 set "NODE_VER="
-if defined NODE_DIR (
-    for /f "tokens=* delims=" %%a in ('"!NODE_DIR!\node.exe" -v 2^>nul') do set "NODE_VER=%%a"
-) else (
-    for /f "tokens=* delims=" %%a in ('node -v 2^>nul') do set "NODE_VER=%%a"
-)
+for /f "delims=" %%a in ('"!NODE_EXE!" -v 2^>nul') do set "NODE_VER=%%a"
 if not defined NODE_VER (
     call :say [step2] node.exe did not answer
     echo.
@@ -138,7 +151,33 @@ if not defined NODE_OK (
     exit /b 2
 )
 
-rem ---------- 3. install dependencies ----------
+rem ---------- 3. choose a working way to call npm ----------
+rem  Take npm.cmd from right next to node.exe, never from the project folder.
+set "NPM_CMD=!NODE_DIR!\npm.cmd"
+if not exist "!NPM_CMD!" set "NPM_CMD=!NODE_DIR!\npm"
+call :say [step3] npm.cmd : !NPM_CMD!
+set "NPM_VER="
+for /f "delims=" %%V in ('call "!NPM_CMD!" -v 2^>nul') do set "NPM_VER=%%V"
+if defined NPM_VER (
+    call :say [step3] npm -v answers : !NPM_VER!
+) else (
+    call :say [step3] npm.cmd does not work, falling back to npm-cli.js
+    set "NPM_CLI=!NODE_DIR!\node_modules\npm\bin\npm-cli.js"
+    if not exist "!NPM_CLI!" (
+        call :say [step3] npm-cli.js is missing too
+        echo.
+        echo   +--------------------------------------------------------------+
+        echo   +  ERROR : npm is broken in this Node.js installation         +
+        echo   +                                                              +
+        echo   +  Reinstall Node.js LTS from   https://nodejs.org            +
+        echo   +--------------------------------------------------------------+
+        echo.
+        exit /b 2
+    )
+    call :say [step3] using npm-cli.js : !NPM_CLI!
+)
+
+rem ---------- 4. install dependencies ----------
 if not exist node_modules (
     echo.
     echo   [setup] First run : installing dependencies. One time only.
@@ -146,7 +185,7 @@ if not exist node_modules (
     echo   [setup] Full npm output is written to start.bat.log
     echo.
     call :say [setup] npm install BEGIN
-    call "%NPM_CMD%" install >> "%LOG%" 2>&1
+    call :npmRun install
     set "IRC=!errorlevel!"
     if not "!IRC!"=="0" (
         call :say [setup] npm install FAILED with code !IRC!
@@ -165,16 +204,16 @@ if not exist node_modules (
     call :say [setup] node_modules already present, install skipped
 )
 
-rem ---------- 4. ports ----------
-call :say [step4] checking ports ...
+rem ---------- 5. ports ----------
+call :say [step5] checking ports ...
 set "FAIL=0"
 call :freePort %PORT_API%
 if "!FAIL!"=="1" exit /b 4
 call :freePort %PORT_WEB%
 if "!FAIL!"=="1" exit /b 4
-call :say [step4] ports ready
+call :say [step5] ports ready
 
-rem ---------- 5. run ----------
+rem ---------- 6. run ----------
 echo.
 echo   Server / API : http://127.0.0.1:4011
 echo   Web  UI      : http://127.0.0.1:5173
@@ -182,7 +221,7 @@ echo.
 echo   Starting now ... press Ctrl+C to stop.
 echo.
 call :say [run] npm run dev BEGIN
-call "%NPM_CMD%" run dev >> "%LOG%" 2>&1
+call :npmRun run dev
 set "RC=!errorlevel!"
 call :say [run] npm run dev END, exit code = !RC!
 call :cleanup
@@ -196,6 +235,22 @@ rem ===================================================================
 echo %*
 >> "%LOG%" echo %*
 exit /b 0
+
+
+rem ===================================================================
+:npmRun
+rem   run npm with all arguments. Uses npm.cmd, or npm-cli.js directly
+rem   when npm.cmd is broken. Output goes to the log.
+rem ===================================================================
+set "NRC=0"
+if defined NPM_CLI (
+    call "!NODE_EXE!" "!NPM_CLI!" %* >> "%LOG%" 2>&1
+    set "NRC=!errorlevel!"
+) else (
+    call "!NPM_CMD!" %* >> "%LOG%" 2>&1
+    set "NRC=!errorlevel!"
+)
+exit /b !NRC!
 
 
 rem ===================================================================
