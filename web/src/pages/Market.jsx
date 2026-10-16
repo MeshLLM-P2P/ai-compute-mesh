@@ -543,16 +543,26 @@ export default function Market({ wallet, pushLog }) {
         在线 Provider 的签名 Listing(点击「调用」建立 P2P 加密会话)。仅显示在线(&lt; 30s 心跳)。
       </p>
       {/* [阶段1 节点发现] 全网在线节点:任何已加入 bootstrap 的节点,
-          无论它发布在哪台服务器,都会出现在这里 */}
-      {peers.length > 0 && (
-        <div className="card" style={{ marginBottom: 10 }}>
-          <div className="row" style={{ alignItems: 'center', gap: 8 }}>
-            <b>网络节点</b>
+          无论它发布在哪台服务器,都会出现在这里。0 节点也显示卡片,
+          否则用户会以为功能不存在(而实际只是没有节点在线) */}
+      <div className="card" style={{ marginBottom: 10 }}>
+        <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+          <b>网络节点</b>
+          {peers.length > 0 ? (
             <span className="badge online">{peers.length} 个在线</span>
-            <span className="muted" style={{ fontSize: 11.5 }}>
-              节点上线即宣告加入(无许可);120s 无心跳自动移出
-            </span>
-          </div>
+          ) : (
+            <span className="badge offline">0 个在线</span>
+          )}
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            节点上线即宣告加入(无许可);120s 无心跳自动移出
+          </span>
+        </div>
+        {peers.length === 0 ? (
+          <p className="muted" style={{ marginBottom: 0 }}>
+            当前没有在线节点。任何已登录账户在 Provider 面板点「上线 agent」,
+            该节点即自动加入网络并出现在这里。
+          </p>
+        ) : (
           <table>
             <thead>
               <tr>
@@ -581,8 +591,8 @@ export default function Market({ wallet, pushLog }) {
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </div>
       {balance && (
         <div className="pill mono" style={{ marginBottom: 10, display: 'inline-block' }}>
           账户余额 {fmtUsd(balance.balanceRaw)} · 可用 {fmtUsd(balance.availableRaw)} · 冻结{' '}
