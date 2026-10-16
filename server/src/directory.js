@@ -13,7 +13,7 @@ export class HttpError extends Error {
 // Listing registry + presence + per-listing call log (server-side simulated ledger view).
 export async function createDirectory(store, cfg) {
   const now = () => Date.now()
-  const listings = () => store.get('listings', {})
+  const listings = () => store.get('listings', {}) || {}
   const isOnline = (l) => now() - (l.lastSeen || 0) < cfg.presenceTtlSec * 1000
 
   async function upsertSigned({ listing, signatureB64, wallet }) {
@@ -85,7 +85,7 @@ export async function createDirectory(store, cfg) {
   }
 
   function list({ onlyOnline = false, provider = null, model = null } = {}) {
-    return Object.values(listings())
+    return Object.values(listings() || {})
       .filter((l) => l.status === 'active' || l.status === 'superseded')
       .filter((l) => (onlyOnline ? isOnline(l) : true))
       .filter((l) => (provider ? l.provider === provider : true))

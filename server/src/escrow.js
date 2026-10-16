@@ -28,7 +28,7 @@ export class EscrowError extends Error {
 export function createEscrow(store, cfg, getListing, recordCall) {
   const now = () => Date.now()
   const keyOf = (consumer, listingId) => consumer + '|' + listingId
-  const all = () => store.get('escrows', {})
+  const all = () => store.get('escrows', {}) || {}
   const updateEscrow = (fn) => store.update('escrows', (m) => fn(m || {}), {})
 
   function getEscrow(consumer, listingId) {

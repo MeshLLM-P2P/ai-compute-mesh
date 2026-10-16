@@ -33,7 +33,12 @@ export function createStore(file) {
   }
 
   return {
-    get: (k, d = null) => (k in data ? data[k] : d),
+    // NOTE: a key can be present but hold null. Older builds wrote null for
+    // empty maps, and a half-copied data.json can too. Callers that pass a
+    // default obviously want the default in that case: returning null made
+    // Object.values(null) blow up with "Cannot convert undefined or null to
+    // object" and took down /listings with a 500.
+    get: (k, d = null) => (k in data && data[k] !== null ? data[k] : d),
     set: (k, v) => {
       data[k] = v
       schedule()
