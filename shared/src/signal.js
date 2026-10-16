@@ -194,3 +194,147 @@ export function openDcChannel({ url, room, onFrame, onDead, log, socketFactory }
     },
   }
 }
+
+// ---- WebRTC 直连通道(阶段 2) ----------------------------------------------
+// 与 openDcChannel 同接口(ready/isOpen/send/close),但数据面走
+// RTCPeerConnection DataChannel 直连,不经服务器中转。
+// SDP/ICE 经 /signal 的 sess 房间交换(服务端已支持 sdp/ice 广播)。
+//
+// 协商时序(consumer 发起):
+//   consumer:  join sess → 等 accept(rtc) → 建 PC + DataChannel →
+//              sdp offer → ICE ↔ → DC open → ready
+//   provider:  收 call → join sess → 发 accept(rtc) → 等 sdp offer →
+//              answer → ICE ↔ → DC open → ready
+// 任一侧 ready 超时(默认 6s):调用方回退 /dc(见 session.js)。
+//
+// Node 无 RTCPeerConnection 时不构造本通道(调用方检测后直接走 relay)。
+const DEFAULT_STUN = 'stun:stun.l.google.com:19302'
+
+export function openRtcChannel({
+  signal,
+  room,
+  isConsumer,
+  log,
+  onFrame,
+  onDead,
+  timeoutMs = 6000,
+  stunUrls,
+}) {
+  const dbg = (s) => {
+    try {
+      console.log('[rtc] ' + s)
+    } catch {}
+    log && log(s)
+  }
+  if (typeof RTCPeerConnection === 'undefined')
+    throw new Error('rtc-unsupported: 当前环境无 RTCPeerConnection')
+
+  let pc = null
+  let dc = null
+  let closedByUs = false
+  let settled = false
+  let settleFn = null
+  const ready = new Promise((resolve, reject) => {
+    settleFn = (err) => {
+      if (settled) return
+      settled = true
+      err ? reject(err) : resolve()
+    }
+  })
+  const timer = setTimeout(() => {
+    if (!settled) settleFn(new Error('rtc-timeout: 直连未在 ' + timeoutMs / 1000 + 's 内建立'))
+    cleanup()
+  }, timeoutMs)
+
+  function cleanup() {
+    try {
+      dc && dc.close()
+    } catch {}
+    try {
+      pc && pc.close()
+    } catch {}
+  }
+
+  pc = new RTCPeerConnection({
+    iceServers: [{ urls: stunUrls || DEFAULT_STUN }],
+  })
+  pc.onicecandidate = (e) => {
+    if (e.candidate) signal.sendTo(room, { t: 'ice', candidate: e.candidate.toJSON() })
+  }
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      if (!settled) settleFn(new Error('rtc-failed: ' + pc.connectionState))
+      if (!closedByUs) onDead && onDead()
+    }
+  }
+
+  if (isConsumer) {
+    // consumer:主动建 DataChannel + 发 SDP offer
+    dc = pc.createDataChannel('mesh', { ordered: true })
+    bindDataChannel()
+    pc.createOffer()
+      .then((offer) => pc.setLocalDescription(offer))
+      .then(() => signal.sendTo(room, { t: 'sdp', role: 'offer', sdp: pc.localDescription }))
+      .catch((e) => settleFn(e))
+  }
+  // provider:等对端 sdp offer(经 handleSignalMsg 进入),ondatachannel 触发
+
+  // 供 session.js 的 sess 房间 handler 转发控制帧:
+  // consumer 收 provider 的 sdp answer + 双方 ice;
+  // provider 收 consumer 的 sdp offer + 双方 ice。
+  function handleSignalMsg(m) {
+    if (!pc) return
+    if (m.t === 'sdp') {
+      if (isConsumer && m.role === 'answer') {
+        pc.setRemoteDescription(new RTCSessionDescription(m.sdp)).catch((e) => dbg('setRemote failed: ' + e.message))
+      } else if (!isConsumer && m.role === 'offer') {
+        pc.setRemoteDescription(new RTCSessionDescription(m.sdp))
+          .then(() => pc.createAnswer())
+          .then((answer) => pc.setLocalDescription(answer))
+          .then(() => signal.sendTo(room, { t: 'sdp', role: 'answer', sdp: pc.localDescription }))
+          .catch((e) => settleFn(e))
+      }
+      return
+    }
+    if (m.t === 'ice' && m.candidate) {
+      pc.addIceCandidate(new RTCIceCandidate(m.candidate)).catch(() => {})
+    }
+  }
+
+  function bindDataChannel() {
+    dc.onopen = () => {
+      dbg('rtc connected (direct data channel)')
+      settleFn()
+    }
+    dc.onclose = () => {
+      if (!closedByUs && !settled) settleFn(new Error('rtc-closed'))
+      if (!closedByUs) onDead && onDead()
+    }
+    dc.onerror = () => {}
+    dc.onmessage = (e) => {
+      const text = typeof e.data === 'string' ? e.data : new TextDecoder().decode(e.data)
+      onFrame && onFrame(text)
+    }
+  }
+
+  // provider 侧:远端 DataChannel 到达时绑定
+  if (!isConsumer) {
+    pc.ondatachannel = (e) => {
+      dc = e.channel
+      bindDataChannel()
+    }
+  }
+
+  return {
+    ready,
+    isOpen: () => !!dc && dc.readyState === 'open',
+    send: (s) => {
+      if (dc && dc.readyState === 'open') dc.send(s)
+    },
+    close() {
+      closedByUs = true
+      cleanup()
+    },
+    handleSignalMsg,
+  }
+}

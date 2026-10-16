@@ -788,6 +788,15 @@ wss.on('connection', (ws) => {
       if (msg.t === 'bye') console.log('[signal] bye -> ' + msg.room.slice(0, 18))
       return
     }
+    // [阶段2 WebRTC] transport 协商控制帧:provider 的 accept(rtc/relay)与
+    // 任一侧的 fallback(直连失败回退 /dc),同样在 sess 房间两方间中继。
+    if (msg.t === 'accept' || msg.t === 'fallback') {
+      if (!msg.room || !msg.room.startsWith('sess:')) return
+      if (!ws.__rooms || !ws.__rooms.has(msg.room)) return
+      broadcast(msg.room, msg, ws)
+      console.log('[signal] ' + msg.t + ' -> ' + msg.room.slice(0, 18))
+      return
+    }
   })
   ws.on('close', () => {
     console.log('[signal] ws closed')

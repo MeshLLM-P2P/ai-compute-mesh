@@ -14,7 +14,7 @@ import {
   receiptDigest,
 } from '@mesh/shared/protocol'
 import { ed25519Verify } from '@mesh/shared/e2ee'
-import { SignalClient, openDcChannel } from '@mesh/shared/signal'
+import { SignalClient, openDcChannel, openRtcChannel } from '@mesh/shared/signal'
 import {
   KxSession,
   encodeEncrypted,
@@ -46,6 +46,10 @@ export async function startConsumerCall({ listing, wallet, log, onState, onToken
   let callTimer = null
   let pingTimer = null
   let pingsOut = 0
+  // [阶段2 WebRTC] transport 协商状态:rtc 通道引用 + accept 等待定时器。
+  // 声明在 fail() 可达的作用域(协商在 try 内异步进行,fail 可能先于声明执行)。
+  let rtcCh = null
+  let acceptTimer = null
 
   const set = (status, extra = {}) => onState({ status, ...extra })
   const fail = (e) => {
@@ -53,9 +57,11 @@ export async function startConsumerCall({ listing, wallet, log, onState, onToken
     failed = true
     clearTimeout(connectTimer)
     clearTimeout(callTimer)
+    clearTimeout(acceptTimer)
     stopPing()
     try {
       ch && ch.close()
+      rtcCh && rtcCh.close()
       signal.close()
     } catch {}
     // [P1 自愈] 错误附带会话快照:调用方(Market)据此决定重试策略——
@@ -85,96 +91,194 @@ export async function startConsumerCall({ listing, wallet, log, onState, onToken
       listingId: listing.id,
       sessionId,
       consumerPub: wallet.address,
+      // [阶段2 WebRTC] transport 能力声明:浏览器优先直连,provider 按自己
+      // 能力(有无 RTCPeerConnection)在 accept 里回选;不回复/旧版本 = relay。
+      transport: ['rtc', 'relay'],
     })
     // 2) session room on /signal:busy 通知仍走信令房间(控制帧)
+    //    [阶段2] 同房间还中转 accept(transport 选择)、fallback(回退)、
+    //    sdp/ice(WebRTC 协商) —— 都在 handler 里分发。
     await signal.join('sess:' + sessionId, {
       msg: (m) => {
         if (m.t === 'busy') fail(new Error('provider-busy: Provider 已满,请稍后再试'))
+        else if (m.t === 'accept') handleAccept(m)
+        else if (m.t === 'fallback') fallbackToRelay()
+        else if ((m.t === 'sdp' || m.t === 'ice') && rtcCh) rtcCh.handleSignalMsg(m)
       },
     })
-    // 3) data channel(/dc):kx 帧 + 加密业务帧。
-    //    kx 握手对象在 join 确认后建立;之前到达的 kx 帧先缓存(preKx),
-    //    因为 WS 只把帧转发给已入房间的成员,join 前的帧由 kx-a 500ms
-    //    重发覆盖,join 后到达的对端 kx-a 进 preKx。
+    // 3) 通道选择(transport 协商,阶段 2 WebRTC):
+    //    等 provider 的 accept —— rtc = WebRTC 直连(数据面不经服务器),
+    //    relay = /dc 中转(现有流程)。provider 不支持 rtc(Node 无头 agent)
+    //    或旧版本不回复 accept → 6s 后默认 relay;RTC 建立失败自动回退 relay。
     const preKx = []
+    let transportChosen = false
+    let kxStarted = false
     // 帧链:逐帧串行「解密+处理」,保证处理序=到达序。
     // WebCrypto decrypt 的完成序不受提交序保证,并行 .then 曾在冷启动窗口
     // 把 token 块乱序拼接(transcript 哈希分歧的根因,见 PLAN.md)。
     let frameChain = Promise.resolve()
-    ch = openDcChannel({
-      url: SIGNAL_URL,
-      room: 'sess:' + sessionId,
-      log: (s) => log('dc: ' + s),
-      onFrame: (text) => {
-        if (text.startsWith('kx:')) {
-          let f
-          try {
-            f = JSON.parse(text.slice(3))
-          } catch {
+
+    // 数据帧处理(relay 与 rtc 两条通道共用):kx 握手帧 + 加密业务帧。
+    // kx 握手对象在通道就绪后建立;之前到达的 kx 帧先缓存(preKx)。
+    const handleFrame = (text) => {
+      if (text.startsWith('kx:')) {
+        let f
+        try {
+          f = JSON.parse(text.slice(3))
+        } catch {
+          return
+        }
+        if (f.t === 'bye') {
+          // 回执已到手后的 bye 是 Provider 的正常收尾,不是对端崩溃
+          if (receipt) {
+            log('kx: peer bye after receipt (expected)')
             return
           }
-          if (f.t === 'bye') {
-            // 回执已到手后的 bye 是 Provider 的正常收尾,不是对端崩溃
-            if (receipt) {
-              log('kx: peer bye after receipt (expected)')
-              return
-            }
-            if (!closing) fail(new Error('peer-bye'))
-            return
-          }
-          if (kx) kx.handleKx(f)
-          else preKx.push(f)
+          if (!closing) fail(new Error('peer-bye'))
           return
         }
-        if (!keys) {
-          log('frame dropped (kx not ready)')
-          return
-        }
-        frameChain = frameChain.then(() =>
-          decodeEncrypted(keys.recvKey, text)
-            .then((frame) => handleBusiness(frame))
-            .catch((e) => log('frame-decrypt-failed: ' + e.message))
-        )
-      },
-      onDead: () => {
-        if (closing) return
-        // Provider 发完最终回执后关连接是正常收尾:回执已到手就不是失败,
-        // 若误判 fail 会触发 cancelEscrow 把 IN_CALL 释放回 FUNDED,
-        // 导致随后点「接受并结算」时 submitReceipt 报 receipt-not-allowed-in-FUNDED
-        if (receipt) {
-          log('dc: peer closed after receipt (expected)')
-          return
-        }
-        fail(new Error('connect-failed: 连接失败(Provider 可能离线)'))
-      },
-    })
-    const readyRace = Promise.race([
-      ch.ready,
-      new Promise((_, rej) => setTimeout(() => rej(new Error('dc-join-timeout: 数据通道加入超时')), 10000)),
-    ])
-    await readyRace
-    connectTimer = setTimeout(
-      () => fail(new Error('connect-timeout: Provider 无响应(可能离线或已满)')),
-      15000
-    )
-    kx = new KxSession({
-      sessionId,
-      sign: wallet.signMessage,
-      peerIdPub: bs58.decode(listing.provider),
-      sendKx: (f) => ch.send('kx:' + JSON.stringify(f)),
-      onReady: (k) => {
-        keys = k
-        clearTimeout(connectTimer)
-        log('kx ready, data channel ready')
-        set('ready', { sessionId })
-      },
-      onFail: fail,
-      log: (s) => log('kx: ' + s),
-    })
-    // 冲刷 join 后、握手对象建立前缓存的对端 kx 帧(保序:对端 kx-a 必先于其 kx-b;
-    // kx-b 自带 epk,即使 kx-a 全丢也能完成握手)。必须在构造后立即冲刷,
-    // 不能放在 onReady 里:onReady 本身依赖这些帧,放那里会死锁。
-    for (const f of preKx.splice(0)) kx.handleKx(f)
+        if (kx) kx.handleKx(f)
+        else preKx.push(f)
+        return
+      }
+      if (!keys) {
+        log('frame dropped (kx not ready)')
+        return
+      }
+      frameChain = frameChain.then(() =>
+        decodeEncrypted(keys.recvKey, text)
+          .then((frame) => handleBusiness(frame))
+          .catch((e) => log('frame-decrypt-failed: ' + e.message))
+      )
+    }
+    // 通道死亡处理(两条通道共用)
+    const handleDead = () => {
+      if (closing) return
+      // Provider 发完最终回执后关连接是正常收尾:回执已到手就不是失败,
+      // 若误判 fail 会触发 cancelEscrow 把 IN_CALL 释放回 FUNDED,
+      // 导致随后点「接受并结算」时 submitReceipt 报 receipt-not-allowed-in-FUNDED
+      if (receipt) {
+        log('channel: peer closed after receipt (expected)')
+        return
+      }
+      fail(new Error('connect-failed: 连接失败(Provider 可能离线)'))
+    }
+
+    // 在选定通道上启动 kx 握手(通道就绪后调用一次)
+    function startKxOn(channel) {
+      ch = channel
+      kxStarted = true
+      connectTimer = setTimeout(
+        () => fail(new Error('connect-timeout: Provider 无响应(可能离线或已满)')),
+        15000
+      )
+      kx = new KxSession({
+        sessionId,
+        sign: wallet.signMessage,
+        peerIdPub: bs58.decode(listing.provider),
+        sendKx: (f) => ch.send('kx:' + JSON.stringify(f)),
+        onReady: (k) => {
+          keys = k
+          clearTimeout(connectTimer)
+          log('kx ready, data channel ready')
+          set('ready', { sessionId })
+        },
+        onFail: fail,
+        log: (s) => log('kx: ' + s),
+      })
+      // 冲刷通道就绪前缓存的对端 kx 帧(保序:对端 kx-a 必先于其 kx-b;
+      // kx-b 自带 epk,即使 kx-a 全丢也能完成握手)。必须在构造后立即冲刷,
+      // 不能放在 onReady 里:onReady 本身依赖这些帧,放那里会死锁。
+      for (const f of preKx.splice(0)) kx.handleKx(f)
+    }
+
+    // relay 路径:/dc 裸帧中继(join sess 房间,服务器原样转发)
+    function openRelayChannel() {
+      const channel = openDcChannel({
+        url: SIGNAL_URL,
+        room: 'sess:' + sessionId,
+        log: (s) => log('dc: ' + s),
+        onFrame: handleFrame,
+        onDead: handleDead,
+      })
+      Promise.race([
+        channel.ready,
+        new Promise((_, rej) =>
+          setTimeout(() => rej(new Error('dc-join-timeout: 数据通道加入超时')), 10000)
+        ),
+      ])
+        .then(() => {
+          if (transportChosen && !kxStarted) startKxOn(channel)
+        })
+        .catch((e) => {
+          if (transportChosen && !kxStarted) fail(e)
+        })
+    }
+
+    // rtc 路径:WebRTC DataChannel 直连;ready 超时/失败 → fallback + relay
+    function startRtcChannel() {
+      try {
+        rtcCh = openRtcChannel({
+          signal,
+          room: 'sess:' + sessionId,
+          isConsumer: true,
+          log: (s) => log('rtc: ' + s),
+          onFrame: handleFrame,
+          onDead: handleDead,
+          timeoutMs: 6000,
+        })
+      } catch (e) {
+        fallbackToRelay()
+        return
+      }
+      rtcCh.ready
+        .then(() => {
+          if (transportChosen && !kxStarted) startKxOn(rtcCh)
+        })
+        .catch((e) => {
+          if (!transportChosen || kxStarted) return
+          log('WebRTC 直连失败(' + (e.message || e) + '),回退中转通道')
+          signal.sendTo('sess:' + sessionId, { t: 'fallback' })
+          rtcCh = null
+          openRelayChannel()
+        })
+    }
+
+    // 回退到 relay(provider 端放弃 RTC / 本端 RTC 失败 / 协商超时)
+    function fallbackToRelay() {
+      if (kxStarted) return // kx 已开始,不回退
+      if (rtcCh) {
+        rtcCh.close()
+        rtcCh = null
+      }
+      if (transportChosen && !kxStarted && ch) return // 已在 relay 路径上
+      transportChosen = true
+      if (acceptTimer) clearTimeout(acceptTimer)
+      log('回退到 /dc 中转通道')
+      openRelayChannel()
+    }
+
+    // provider 的 transport 选择应答
+    function handleAccept(m) {
+      if (transportChosen || kxStarted) return
+      transportChosen = true
+      if (acceptTimer) clearTimeout(acceptTimer)
+      if (m.transport === 'rtc' && typeof RTCPeerConnection !== 'undefined') {
+        log('provider 支持直连,建立 WebRTC 数据通道…')
+        startRtcChannel()
+      } else {
+        openRelayChannel()
+      }
+    }
+
+    // 等 provider accept;6s 无应答(旧版本 provider)默认 relay
+    acceptTimer = setTimeout(() => {
+      if (!transportChosen && !kxStarted) {
+        transportChosen = true
+        log('provider 未响应 transport 协商(可能为旧版本),默认中转通道')
+        openRelayChannel()
+      }
+    }, 6000)
   } catch (e) {
     fail(e)
     return null
@@ -454,12 +558,16 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
     call.finished = true
     // 正常结束路径也要清未触发的 connectTimer,避免孤儿 "call ended" 日志
     if (call.connectTimer) clearTimeout(call.connectTimer)
+    if (call.sdpTimer) clearTimeout(call.sdpTimer)
     activeCount = Math.max(0, activeCount - 1)
     activeCalls.delete(call)
     activeSessions.delete(call.sessionId)
+    // [阶段2] 退出 /signal 的 sess 房间(transport 协商期间加入的)
+    signal.leave('sess:' + call.sessionId)
     try {
       if (call.ch && call.ch.isOpen()) call.ch.send('kx:' + JSON.stringify({ t: 'bye' }))
       call.ch && call.ch.close()
+      call.rtcCh && call.rtcCh.close()
     } catch {}
     onCallEnd && onCallEnd({ ok, sessionId: call.sessionId, ...extra })
   }
@@ -515,6 +623,10 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
       kx: null,
       keys: null,
       finished: false,
+      // [阶段2 WebRTC] rtc 通道引用 / relay 已开标志 / 等 SDP 超时器
+      rtcCh: null,
+      relayOpened: false,
+      sdpTimer: null,
       // 多轮对话状态:一次 call 内累计全部历史与 token 量
       history: [],
       params: null,
@@ -536,83 +648,166 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
     connectTimer = setTimeout(() => fail(new Error('connect-timeout')), 15000)
     call.connectTimer = connectTimer // 供 finish() 在正常结束路径上清理
 
-    // join 前到达的对端 kx 帧先缓存;kx 握手对象在 join 确认后建立
+    // join 前到达的对端 kx 帧先缓存;kx 握手对象在通道就绪后建立
     const preKx = []
     // 帧链:同 consumer 侧,保证 prompt/end 处理序=到达序
     let frameChain = Promise.resolve()
-    const ch = openDcChannel({
-      url: SIGNAL_URL,
-      room: 'sess:' + sessionId,
-      log: (s) => log('dc: ' + s),
-      onFrame: (text) => {
-        if (text.startsWith('kx:')) {
-          let f
-          try {
-            f = JSON.parse(text.slice(3))
-          } catch {
-            return
-          }
-          if (f.t === 'bye') {
-            if (!call.finished) finish(call, true)
-            return
-          }
-          if (call.kx) call.kx.handleKx(f)
-          else preKx.push(f)
-          return
-        }
-        if (!call.kx || !call.keys) {
-          log('frame dropped (kx not ready)')
-          return
-        }
-        // ping 帧带外处理:立即解密并回 pong,不进串行帧链。
-        // 否则长模型生成(实测可达 136s)会占住帧链,期间到达的 ping 被排队,
-        // provider 无法及时回 pong → consumer 看门狗误判 dc-dead 杀掉正常通话。
-        // 业务帧(prompt/end/token/receipt/error)仍走帧链保序,顺序不受影响。
-        decodeEncrypted(call.keys.recvKey, text)
-          .then((frame) => {
-            if (frame.t === 'ping') {
-              sendEncryptedFor(call, { t: 'pong' }).catch(() => {})
-              return
-            }
-            frameChain = frameChain.then(() => handleBusiness(call, frame))
-          })
-          .catch((e) => log('frame-decrypt-failed: ' + e.message))
-      },
-      onDead: () => {
-        if (!call.finished) fail(new Error('peer-closed: 连接断开'))
+
+    // [阶段2 WebRTC] transport 协商:provider 按自身能力(有无
+    // RTCPeerConnection)与 offer 声明选择直连(rtc)或中转(relay)。
+    // /signal 的 sess 房间(与 /dc 房间表相互独立)承载 accept/sdp/ice/fallback。
+    const canRtc =
+      typeof RTCPeerConnection !== 'undefined' &&
+      Array.isArray(m.transport) &&
+      m.transport.includes('rtc')
+    await signal.join('sess:' + sessionId, {
+      msg: (sm) => {
+        if ((sm.t === 'sdp' || sm.t === 'ice') && call.rtcCh) call.rtcCh.handleSignalMsg(sm)
+        else if (sm.t === 'fallback') fallbackToRelay()
       },
     })
-    call.ch = ch
-    try {
-      await ch.ready
-    } catch (e) {
-      fail(e)
-      return
+    signal.sendTo('sess:' + sessionId, { t: 'accept', transport: canRtc ? 'rtc' : 'relay' })
+
+    // 数据帧处理(relay 与 rtc 两条通道共用)
+    const handleFrame = (text) => {
+      if (text.startsWith('kx:')) {
+        let f
+        try {
+          f = JSON.parse(text.slice(3))
+        } catch {
+          return
+        }
+        if (f.t === 'bye') {
+          if (!call.finished) finish(call, true)
+          return
+        }
+        if (call.kx) call.kx.handleKx(f)
+        else preKx.push(f)
+        return
+      }
+      if (!call.kx || !call.keys) {
+        log('frame dropped (kx not ready)')
+        return
+      }
+      // ping 帧带外处理:立即解密并回 pong,不进串行帧链。
+      // 否则长模型生成(实测可达 136s)会占住帧链,期间到达的 ping 被排队,
+      // provider 无法及时回 pong → consumer 看门狗误判 dc-dead 杀掉正常通话。
+      // 业务帧(prompt/end/token/receipt/error)仍走帧链保序,顺序不受影响。
+      decodeEncrypted(call.keys.recvKey, text)
+        .then((frame) => {
+          if (frame.t === 'ping') {
+            sendEncryptedFor(call, { t: 'pong' }).catch(() => {})
+            return
+          }
+          frameChain = frameChain.then(() => handleBusiness(call, frame))
+        })
+        .catch((e) => log('frame-decrypt-failed: ' + e.message))
     }
-    call.kx = new KxSession({
-      sessionId,
-      sign: wallet.signMessage,
-      peerIdPub: consumerPub,
-      sendKx: (f) => ch.send('kx:' + JSON.stringify(f)),
-      onReady: (k) => {
-        call.keys = k
-        clearTimeout(connectTimer)
-        onCall && onCall({ sessionId, phase: 'ready' })
-        // 120s 内没等到提示词(消费者崩溃/静默断链)→ 释放并发槽
-        // (重握手会再次触发 onReady:先清旧定时器,防止双 timer)
-        if (call.promptTimer) clearTimeout(call.promptTimer)
-        call.promptTimer = setTimeout(() => {
-          if (!call.finished)
-            fail(new Error('no-prompt-timeout: 120 秒未收到提示词'))
-        }, 120000)
-      },
-      onFail: fail,
-      log: (s) => log('kx: ' + s),
-    })
-    // 冲刷 join 后、握手对象建立前缓存的对端 kx 帧(kx-b 自带 epk,
-    // 即使 kx-a 全丢也能完成握手;放 onReady 里会死锁)
-    for (const f of preKx.splice(0)) call.kx.handleKx(f)
-    onCall && onCall({ sessionId, phase: 'connecting' })
+    const handleDead = () => {
+      if (!call.finished) fail(new Error('peer-closed: 连接断开'))
+    }
+
+    // 在选定通道上建立 kx 握手(通道就绪后调用一次)
+    function startKxOn(channel) {
+      call.ch = channel
+      call.kx = new KxSession({
+        sessionId,
+        sign: wallet.signMessage,
+        peerIdPub: consumerPub,
+        sendKx: (f) => channel.send('kx:' + JSON.stringify(f)),
+        onReady: (k) => {
+          call.keys = k
+          clearTimeout(connectTimer)
+          onCall && onCall({ sessionId, phase: 'ready' })
+          // 120s 内没等到提示词(消费者崩溃/静默断链)→ 释放并发槽
+          // (重握手会再次触发 onReady:先清旧定时器,防止双 timer)
+          if (call.promptTimer) clearTimeout(call.promptTimer)
+          call.promptTimer = setTimeout(() => {
+            if (!call.finished)
+              fail(new Error('no-prompt-timeout: 120 秒未收到提示词'))
+          }, 120000)
+        },
+        onFail: fail,
+        log: (s) => log('kx: ' + s),
+      })
+      // 冲刷通道就绪前缓存的对端 kx 帧(kx-b 自带 epk,
+      // 即使 kx-a 全丢也能完成握手;放 onReady 里会死锁)
+      for (const f of preKx.splice(0)) call.kx.handleKx(f)
+      onCall && onCall({ sessionId, phase: 'connecting' })
+    }
+
+    // relay 路径:/dc 裸帧中继(join sess 房间,服务器原样转发)
+    function openRelayChannel() {
+      if (call.relayOpened) return
+      call.relayOpened = true
+      const channel = openDcChannel({
+        url: SIGNAL_URL,
+        room: 'sess:' + sessionId,
+        log: (s) => log('dc: ' + s),
+        onFrame: handleFrame,
+        onDead: handleDead,
+      })
+      channel.ready
+        .then(() => {
+          if (!call.finished && !call.kx) startKxOn(channel)
+        })
+        .catch((e) => {
+          if (!call.finished && !call.kx) fail(e)
+        })
+    }
+
+    // rtc 路径:WebRTC DataChannel 直连;ready 超时/失败 → fallback + relay
+    function startRtcChannel() {
+      try {
+        call.rtcCh = openRtcChannel({
+          signal,
+          room: 'sess:' + sessionId,
+          isConsumer: false,
+          log: (s) => log('rtc: ' + s),
+          onFrame: handleFrame,
+          onDead: handleDead,
+          timeoutMs: 6000,
+        })
+      } catch (e) {
+        fallbackToRelay()
+        return
+      }
+      call.rtcCh.ready
+        .then(() => {
+          if (!call.finished && !call.kx) startKxOn(call.rtcCh)
+        })
+        .catch((e) => {
+          if (call.finished || call.kx) return
+          log('WebRTC 直连失败(' + (e.message || e) + '),回退中转通道')
+          signal.sendTo('sess:' + sessionId, { t: 'fallback' })
+          fallbackToRelay()
+        })
+    }
+
+    // 回退到 relay(consumer 放弃直连 / 本端等 SDP 超时 / RTC 失败)
+    function fallbackToRelay() {
+      if (call.finished || call.kx || call.relayOpened) return
+      if (call.rtcCh) {
+        call.rtcCh.close()
+        call.rtcCh = null
+      }
+      if (call.sdpTimer) clearTimeout(call.sdpTimer)
+      openRelayChannel()
+    }
+
+    if (canRtc) {
+      // 等 consumer 的 sdp offer;6s 未到 → fallback relay
+      call.sdpTimer = setTimeout(() => {
+        if (!call.kx && !call.relayOpened) {
+          log('等待 SDP offer 超时,回退中转通道')
+          signal.sendTo('sess:' + sessionId, { t: 'fallback' })
+          fallbackToRelay()
+        }
+      }, 6000)
+      startRtcChannel()
+    } else {
+      openRelayChannel()
+    }
   }
 
   // 多轮对话:一次 call(一条数据通道连接 + 一份托管)内可发多条 prompt。
