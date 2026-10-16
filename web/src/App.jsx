@@ -266,9 +266,9 @@ export default function App() {
             )}
           </div>
           <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--muted)' }}>
-            {() => {
+            {(() => {
               if (!refCfg) return <span>填入分享码后登录即绑定该推荐人,按实际结算额返一定比例。</span>
-              if (!refCfg.active) return <span>本服务器未开启推荐返利(返利速率需 >0)。</span>
+              if (!refCfg.active) return <span>本服务器未开启推荐返利(返利速率需大于 0)。</span>
               const capPart = refCfg.noCap
                 ? '无累计上限。'
                 : `累计上限 ${(refCfg.capRaw / 1e6).toFixed(1)} USDT。`
@@ -278,7 +278,7 @@ export default function App() {
                   {refCfg.ratePct}% 返利,{capPart}未填分享码时默认推荐人=平台收款钱包(平台拿返利)。
                 </span>
               )
-            }}
+            })()}
           </div>
         </div>
         <button onClick={login} disabled={logging} style={{ marginTop: 18, padding: '12px 28px', fontSize: 15 }}>
