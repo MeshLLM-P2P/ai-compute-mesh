@@ -9,6 +9,7 @@ import { CONFIG } from './config.js'
 import { createStore } from './store.js'
 import { createAuth } from './auth.js'
 import { createDirectory, HttpError } from './directory.js'
+import { createPeers } from './peers.js'
 import { createEscrow, EscrowError } from './escrow.js'
 import { mockLlmRouter } from './mockllm.js'
 import {
@@ -24,6 +25,7 @@ import {
 const store = createStore(CONFIG.dataFile)
 const auth = createAuth(store)
 const directory = await createDirectory(store, CONFIG)
+const peers = createPeers(store, CONFIG)
 const escrow = createEscrow(store, CONFIG, directory.get, directory.recordCall)
 
 const app = express()
@@ -302,6 +304,9 @@ app.post('/presence/offline', (req, res, next) => {
     const listingId = (req.body && req.body.listingId) || req.query.listingId
     if (!listingId) return res.status(400).json({ error: 'listingId-required' })
     directory.offline(wallet, listingId)
+    // 节点发现同步:该钱包的 agent 全部下线时清掉 peers 记录,
+    // 不等 120s TTL 衰减(否则市场"网络节点"区块仍显示在线)
+    peers.leaveByWallet(wallet)
     res.json({ ok: true, ts: Date.now() })
   } catch (e) {
     next(e)
@@ -309,6 +314,42 @@ app.post('/presence/offline', (req, res, next) => {
 })
 app.get('/listings/:id/calls', (req, res) => {
   res.json({ calls: directory.calls(req.params.id) })
+})
+// ---- peers(阶段 1:节点发现) -----------------------------------------------
+// 无许可加入:任何已登录节点 POST /peers/join 即出现在网络视图,无需审批。
+// 前端(Provider agent 上线)与 Node agent 都调它;心跳沿用 presence TTL。
+app.post('/peers/join', auth.requireSession, (req, res, next) => {
+  try {
+    const { nodeId, endpoint, models } = req.body || {}
+    const { peers: online } = peers.join(req.wallet, { nodeId, endpoint, models })
+    res.json({ ok: true, ts: Date.now(), peers: online })
+  } catch (e) {
+    next(e)
+  }
+})
+app.post('/peers/heartbeat', auth.requireSession, (req, res, next) => {
+  try {
+    const { nodeId } = req.body || {}
+    if (!peers.heartbeat(req.wallet, nodeId))
+      return res.status(404).json({ error: 'not-joined' })
+    res.json({ ok: true, ts: Date.now() })
+  } catch (e) {
+    next(e)
+  }
+})
+app.post('/peers/leave', auth.requireSession, (req, res, next) => {
+  try {
+    const { nodeId } = req.body || {}
+    peers.leave(req.wallet, nodeId)
+    res.json({ ok: true, ts: Date.now() })
+  } catch (e) {
+    next(e)
+  }
+})
+// 全网在线节点(公开):市场页"网络节点"区块 + 任何节点发现彼此。
+app.get('/peers', (req, res) => {
+  const online = peers.list()
+  res.json({ peers: online, total: online.length })
 })
 app.delete('/listings/:id', auth.requireSession, (req, res, next) => {
   try {

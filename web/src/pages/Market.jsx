@@ -60,6 +60,8 @@ export default function Market({ wallet, pushLog }) {
   const [tl, setTl] = useState(null)
   // [P3 目录搜索] 市场搜索框(后端 /listings 已支持 q 参数)
   const [searchQ, setSearchQ] = useState('')
+  // [阶段1 节点发现] 全网在线节点(bootstrap 注册表视图)
+  const [peers, setPeers] = useState([])
   // 连接阶段自动重试的定时器:关闭会话时必须清掉,否则挂起的 setTimeout
   // 会在 1.5s 后触发 startCall 把刚关闭的对话重新打开(22:08 用户反馈的
   // "点关闭还会自动打开"根因)
@@ -80,6 +82,14 @@ export default function Market({ wallet, pushLog }) {
   const loadBalance = useCallback(async () => {
     try {
       setBalance(await api('/me/balance'))
+    } catch {}
+  }, [])
+
+  // [阶段1 节点发现] 全网在线节点:任何 join 过 bootstrap 的节点都在这里
+  const loadPeers = useCallback(async () => {
+    try {
+      const r = await api('/peers')
+      setPeers(r.peers || [])
     } catch {}
   }, [])
 
@@ -118,9 +128,14 @@ export default function Market({ wallet, pushLog }) {
   useEffect(() => {
     load()
     loadBalance()
+    loadPeers()
     const t = setInterval(load, 5000)
-    return () => clearInterval(t)
-  }, [load, loadBalance])
+    const tp = setInterval(loadPeers, 5000)
+    return () => {
+      clearInterval(t)
+      clearInterval(tp)
+    }
+  }, [load, loadBalance, loadPeers])
 
   const sortList = (arr) => {
     const val = (l) => {
@@ -527,6 +542,47 @@ export default function Market({ wallet, pushLog }) {
       <p className="muted">
         在线 Provider 的签名 Listing(点击「调用」建立 P2P 加密会话)。仅显示在线(&lt; 30s 心跳)。
       </p>
+      {/* [阶段1 节点发现] 全网在线节点:任何已加入 bootstrap 的节点,
+          无论它发布在哪台服务器,都会出现在这里 */}
+      {peers.length > 0 && (
+        <div className="card" style={{ marginBottom: 10 }}>
+          <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+            <b>网络节点</b>
+            <span className="badge online">{peers.length} 个在线</span>
+            <span className="muted" style={{ fontSize: 11.5 }}>
+              节点上线即宣告加入(无许可);120s 无心跳自动移出
+            </span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>节点</th>
+                <th>模型</th>
+                <th>endpoint</th>
+              </tr>
+            </thead>
+            <tbody>
+              {peers.map((p) => (
+                <tr key={p.nodeId}>
+                  <td className="mono">
+                    {p.wallet.slice(0, 4)}…{p.wallet.slice(-4)}
+                    <br />
+                    <span style={{ fontSize: 11, opacity: 0.6 }}>{shortHash(p.nodeId, 12)}</span>
+                  </td>
+                  <td>
+                    {p.models && p.models.length > 0
+                      ? p.models.map((m, i) => <div key={i}>{m.name}</div>)
+                      : <span className="muted">—</span>}
+                  </td>
+                  <td className="mono" style={{ fontSize: 11.5 }}>
+                    {p.endpoint || <span className="muted">浏览器节点(不可直连)</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {balance && (
         <div className="pill mono" style={{ marginBottom: 10, display: 'inline-block' }}>
           账户余额 {fmtUsd(balance.balanceRaw)} · 可用 {fmtUsd(balance.availableRaw)} · 冻结{' '}

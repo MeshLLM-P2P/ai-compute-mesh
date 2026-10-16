@@ -415,6 +415,8 @@ export default function ProviderPanel({ wallet, pushLog }) {
       const prev = beatsRef.current[id]
       if (prev && prev.timer) clearInterval(prev.timer)
       beatsRef.current[id] = { timer: setInterval(beat, 5000), beat }
+      // [阶段1 节点发现] 心跳同时给 /peers 续命(join 幂等,顺带刷新 models)
+      joinPeer()
       if (!agentsRef.current[id]) {
         try {
           // 表单里的 key 优先(并持久化);空表单(自动恢复)回退到上次保存的 key
@@ -445,6 +447,12 @@ export default function ProviderPanel({ wallet, pushLog }) {
       }
       startedRef.current.add(id)
       savePrefs([...new Set([...readPrefs(), id])])
+      // [阶段1 节点发现] agent 上线 = 宣告本节点加入网络(携带该模型摘要)
+      peerModelsRef.current = [
+        ...peerModelsRef.current.filter((m) => m.listingId !== id),
+        { name: l.model?.name || shortHash(id, 8), listingId: id },
+      ]
+      joinPeer()
       pushLog('agent 上线: ' + (l.model?.name || shortHash(id, 8)))
     } else {
       const b = beatsRef.current[id]
@@ -458,6 +466,13 @@ export default function ProviderPanel({ wallet, pushLog }) {
       startedRef.current.delete(id)
       patch(null)
       savePrefs(readPrefs().filter((x) => x !== id))
+      // [阶段1 节点发现] 从节点模型清单移除;清单空了则正式离开网络
+      peerModelsRef.current = peerModelsRef.current.filter((m) => m.listingId !== id)
+      if (peerModelsRef.current.length === 0) {
+        api('/peers/leave', { method: 'POST', body: {} }).catch(() => {})
+      } else {
+        joinPeer()
+      }
       pushLog('agent 下线: ' + (l.model?.name || shortHash(id, 8)))
     }
   }
@@ -468,6 +483,15 @@ export default function ProviderPanel({ wallet, pushLog }) {
   // 成"确认删除/取消"),第二次点击才真正删除;8s 未确认自动取消。每个分支都有日志。
   const [confirmDelId, setConfirmDelId] = useState(null)
   const disarmTimer = useRef(null)
+  // [阶段1 节点发现] 本浏览器节点当前在线的模型摘要,agent 上线时同步宣告。
+  // nodeId 按钱包派生(一个浏览器 = 一个节点);下线到空时自动 leave。
+  const peerModelsRef = useRef([])
+  const joinPeer = () => {
+    api('/peers/join', {
+      method: 'POST',
+      body: { nodeId: 'browser:' + wallet.address.slice(0, 16), models: peerModelsRef.current },
+    }).catch(() => {})
+  }
   const armDelete = (l) => {
     setConfirmDelId(l.id)
     pushLog('准备删除「' + (l.model?.name || shortHash(l.id, 8)) + '」:再点一次「确认删除」执行(8 秒后自动取消)')
