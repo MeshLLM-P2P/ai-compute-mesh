@@ -43,6 +43,11 @@ export async function startConsumerCall({
   onClosed,
   serverBase = null,
   sessionToken = null,
+  // [跨网段] true = 跳过 WebRTC,直接走 /dc 中转。
+  // 跨网段(不同 NAT)时打洞虽然能连上,但映射保不住 —— 实测 ICE consent
+  // 在 5s 后失效,通道被对端关闭(现象:rtc connected → kx ready → connect-failed)。
+  // 没有 TURN 服务器前,跨网段一律中转;同机/同网段仍用直连(数据面不经服务器)。
+  preferRelay = false,
 }) {
   const sessionId = crypto.randomUUID()
   const params = callParams(listing)
@@ -114,9 +119,14 @@ export async function startConsumerCall({
       consumerPub: wallet.address,
       // [阶段2 WebRTC] transport 能力声明:浏览器优先直连,provider 按自己
       // 能力(有无 RTCPeerConnection)在 accept 里回选;不回复/旧版本 = relay。
-      transport: ['rtc', 'relay'],
+      // [跨网段] preferRelay 时只声明 relay,provider 直接开中转通道。
+      transport: preferRelay ? ['relay'] : ['rtc', 'relay'],
     })
-    log('offer sent (transport=rtc,relay),等待 provider accept…')
+    log(
+      preferRelay
+        ? 'offer sent (transport=relay,跨网段直连不稳定),等待 provider accept…'
+        : 'offer sent (transport=rtc,relay),等待 provider accept…'
+    )
     // 2) session room on /signal:busy 通知仍走信令房间(控制帧)
     //    [阶段2] 同房间还中转 accept(transport 选择)、fallback(回退)、
     //    sdp/ice(WebRTC 协商) —— 都在 handler 里分发。
@@ -135,6 +145,13 @@ export async function startConsumerCall({
     const preKx = []
     let transportChosen = false
     let kxStarted = false
+    // [跨网段] 不等 accept、不试直连:立刻开 /dc 中转(经本机 bootstrap 转发)。
+    // provider 收到 transport=['relay'] 也会同步开中转,双方在 sess 房间会合。
+    if (preferRelay) {
+      transportChosen = true
+      log('跨网段调用:直接使用 /dc 中转通道')
+      openRelayChannel()
+    }
     // 帧链:逐帧串行「解密+处理」,保证处理序=到达序。
     // WebCrypto decrypt 的完成序不受提交序保证,并行 .then 曾在冷启动窗口
     // 把 token 块乱序拼接(transcript 哈希分歧的根因,见 PLAN.md)。

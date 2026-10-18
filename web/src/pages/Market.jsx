@@ -310,6 +310,9 @@ export default function Market({ wallet, pushLog }) {
         // [跨 bootstrap] 远程 bootstrap:信令/数据通道/结算全走那边
         serverBase: remoteBase,
         sessionToken: remoteToken,
+        // [跨网段] 远程调用走中转:跨 NAT 打洞能连上但 5s 后失效(无 TURN),
+        // 中转经本机 bootstrap → 对方 bootstrap,稳定且 E2EE 不受影响
+        preferRelay: !!remoteBase,
         log: (m) => pushLog('会话: ' + m),
         onState: (st) => {
           setCall((c) => ({ ...c, state: st, listing: c.listing || full }))

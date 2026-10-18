@@ -262,6 +262,9 @@ export function openRtcChannel({
     if (e.candidate) signal.sendTo(room, { t: 'ice', candidate: e.candidate.toJSON() })
   }
   pc.onconnectionstatechange = () => {
+    // 诊断:跨网段打洞常见 "connected → disconnected → failed"(NAT 映射保不住),
+    // 有这行日志才能一眼区分是协商失败还是连上后掉线。
+    dbg('pc state=' + pc.connectionState)
     if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
       if (!settled) settleFn(new Error('rtc-failed: ' + pc.connectionState))
       if (!closedByUs) onDead && onDead()
@@ -306,7 +309,8 @@ export function openRtcChannel({
       dbg('rtc connected (direct data channel)')
       settleFn()
     }
-    dc.onclose = () => {
+    dc.onclose = (e) => {
+      dbg('dc closed (code=' + (e && e.code) + ', reason=' + (e && e.reason) + ')')
       if (!closedByUs && !settled) settleFn(new Error('rtc-closed'))
       if (!closedByUs) onDead && onDead()
     }
