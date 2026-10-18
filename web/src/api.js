@@ -32,6 +32,19 @@ export function browserBase(base) {
   return b
 }
 
+// [跨 bootstrap 代理] 把远程 origin 改写为"经本机 bootstrap 转发"的 base:
+//   https://192.168.2.108:4011 → https://<本机>:4011/xboot/192.168.2.108:4011
+//   http://127.0.0.1:4022      → https://<本机>:4011/xboot/http/127.0.0.1:4022
+// 这样浏览器只与本机 server 通信(页面就是用同一张证书加载的,信任必然成立),
+// 由 Node 侧转发到远程 bootstrap —— 跨机调用不再需要信任对方的自签证书,
+// 也不受系统代理/混合内容影响。E2EE 在通道内完成,转发方只搬字节。
+export function xbootBase(origin) {
+  const raw = String(origin || '').replace(/\/+$/, '')
+  const plain = raw.startsWith('http://')
+  const hostPort = raw.replace(/^https?:\/\//, '')
+  return BASE + '/xboot/' + (plain ? 'http/' : '') + hostPort
+}
+
 async function _api(base, token, path, { method = 'GET', body } = {}) {
   base = browserBase(base)
   let res

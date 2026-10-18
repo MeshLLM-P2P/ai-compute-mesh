@@ -12,6 +12,7 @@ import { createDirectory, HttpError } from './directory.js'
 import { createPeers } from './peers.js'
 import { createFederation } from './federation.js'
 import { createEscrow, EscrowError } from './escrow.js'
+import { attachXbootHttp, xbootUpgrade, XBOOT_PREFIX } from './xboot-proxy.js'
 import { mockLlmRouter } from './mockllm.js'
 import {
   AGENT_CONFIG_PATH,
@@ -32,6 +33,9 @@ const escrow = createEscrow(store, CONFIG, directory.get, directory.recordCall)
 
 const app = express()
 app.use(cors())
+// [跨 bootstrap 代理] 必须在 express.json 之前挂载:代理要原样转发请求体,
+// 一旦被 json 解析器消费,POST /escrow/fund 等就会变成空 body。
+attachXbootHttp(app)
 app.use(express.json({ limit: '1mb' }))
 // [P1 可观测] HTTP 请求日志:method/path/status/耗时。
 // 跳过 /health(客户端轮询噪音);/relay 在处理器内另有上游状态+流式字节专用行。
@@ -877,6 +881,11 @@ server.on('upgrade', (req, socket, head) => {
   }
   if (pathname === '/dc') {
     dcWss.handleUpgrade(req, socket, head, (ws) => dcWss.emit('connection', ws, req))
+    return
+  }
+  // [跨 bootstrap 代理] /xboot/<host:port>/signal|/dc → 转发到远程 bootstrap
+  if (pathname.startsWith(XBOOT_PREFIX)) {
+    xbootUpgrade(req, socket, head)
     return
   }
   socket.destroy()

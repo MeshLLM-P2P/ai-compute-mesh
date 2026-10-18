@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { api, getConversation, downloadJson, loginRemote, makeApi } from '../api.js'
+import { api, getConversation, downloadJson, loginRemote, makeApi, xbootBase } from '../api.js'
 import { startConsumerCall } from '../session.js'
 import CallTimeline from '../timeline.jsx'
 import { calcAmountRaw, splitFees } from '@mesh/shared/protocol'
@@ -101,8 +101,10 @@ export default function Market({ wallet, pushLog }) {
   const clientFor = useCallback(
     async (l) => {
       if (!l || !l.federated || !l.origin) return api
-      const token = await loginRemote(l.origin, wallet)
-      return makeApi(l.origin, token).api
+      // 经本机 bootstrap 转发(xbootBase),浏览器无需信任远程自签证书
+      const base = xbootBase(l.origin)
+      const token = await loginRemote(base, wallet)
+      return makeApi(base, token).api
     },
     [wallet]
   )
@@ -259,13 +261,14 @@ export default function Market({ wallet, pushLog }) {
       let remoteBase = null
       let remoteToken = null
       if (l.federated && l.origin) {
-        remoteBase = l.origin
+        // 经本机 bootstrap 转发到远程:浏览器只连本机,免去信任对方自签证书
+        remoteBase = xbootBase(l.origin)
         remoteToken = await loginRemote(remoteBase, wallet)
         apiFn = makeApi(remoteBase, remoteToken).api
         pushLog(
           '跨 bootstrap 调用:模型位于 ' +
-            remoteBase.replace(/^https?:\/\//, '') +
-            '(托管/信令/数据通道全走对方 bootstrap)'
+            l.origin.replace(/^https?:\/\//, '') +
+            '(经本机转发:托管/信令/数据通道全走对方 bootstrap)'
         )
         try {
           const rb = await apiFn('/me/balance')
