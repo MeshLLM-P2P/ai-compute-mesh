@@ -23,7 +23,7 @@ import {
   runBackend,
   cachedTokensOf,
 } from '@mesh/shared/channel'
-import { api, SERVER, SIGNAL_URL, getSession, makeApi, wsUrlOf } from './api.js'
+import { api, SERVER, SIGNAL_URL, getSession, makeApi, wsUrlOf, browserBase } from './api.js'
 
 // ---------- consumer orchestrator ------------------------------------------
 
@@ -46,6 +46,9 @@ export async function startConsumerCall({
 }) {
   const sessionId = crypto.randomUUID()
   const params = callParams(listing)
+  // [跨 bootstrap] 远程 base 归一化:https 页面下的 http:// 升级为 https://
+  // (混合内容策略会拦掉),信令/中继/结算与对面保持一致
+  if (serverBase) serverBase = browserBase(serverBase)
   const signalUrl = serverBase ? wsUrlOf(serverBase) : SIGNAL_URL
   const apiFn = serverBase ? makeApi(serverBase, sessionToken).api : api
   const signal = new SignalClient(signalUrl)

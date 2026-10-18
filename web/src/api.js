@@ -22,15 +22,38 @@ export function getSession() {
   return sessionToken
 }
 
+// [跨 bootstrap] 页面是 https 时,把 http:// 的 bootstrap 地址升级为 https:// ——
+// 浏览器混合内容策略会直接拦掉 https 页面里的 http 请求(fetch 报
+// TypeError: Failed to fetch,且控制台只显示一条 mixed-content 警告)。
+// Node/测试环境(location 不存在)原样返回,不受影响。
+export function browserBase(base) {
+  const b = String(base || '').replace(/\/+$/, '')
+  if (_proto === 'https:' && b.startsWith('http://')) return 'https://' + b.slice('http://'.length)
+  return b
+}
+
 async function _api(base, token, path, { method = 'GET', body } = {}) {
-  const res = await fetch(base + path, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { 'x-mesh-session': token } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  base = browserBase(base)
+  let res
+  try {
+    res = await fetch(base + path, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'x-mesh-session': token } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    })
+  } catch (e) {
+    // 浏览器网络层失败(请求根本没发出去或被拦截)。跨 bootstrap 调用时最常见三种:
+    // ① 对方自签证书没被这个浏览器接受 ② 系统代理拦截了局域网 IP ③ 地址不可达
+    throw new Error(
+      '无法连接 ' + base + '(网络层失败: ' + (e && e.message ? e.message : String(e)) + ')。' +
+        '请检查:① 是否已在浏览器地址栏直接打开过该地址并信任其自签证书' +
+        '(提示"不安全"时点高级→继续访问)② 系统代理是否拦截局域网地址' +
+        '(可关闭代理或把该 IP 加入直连规则)③ 对方机器是否开机、bootstrap 是否在线'
+    )
+  }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const e = new Error(data.error || `HTTP ${res.status}`)
@@ -55,6 +78,7 @@ export function wsUrlOf(base) {
 // [跨 bootstrap] 为指定 bootstrap 建立一套 API 客户端。返回对象上的
 // api(path, opts) 与本地 api() 同签名,但请求打到 base 且带远程 token。
 export function makeApi(base, token) {
+  base = browserBase(base)
   return {
     base,
     token,
@@ -72,6 +96,7 @@ export function clearRemoteSessions() {
 // 在指定 bootstrap 上登录(同一钱包):nonce 由远端签发,本地签名,
 // 每个 bootstrap 独立 session。返回 token(缓存命中直接返回)。
 export async function loginRemote(base, wallet) {
+  base = browserBase(base)
   const cached = remoteSessions.get(base)
   if (cached) return cached
   const { nonce } = await _api(base, null, '/nonce?wallet=' + encodeURIComponent(wallet.address))
