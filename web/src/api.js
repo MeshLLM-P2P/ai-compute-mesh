@@ -40,8 +40,11 @@ export function browserBase(base) {
 // 也不受系统代理/混合内容影响。E2EE 在通道内完成,转发方只搬字节。
 export function xbootBase(origin) {
   const raw = String(origin || '').replace(/\/+$/, '')
-  const plain = raw.startsWith('http://')
   const hostPort = raw.replace(/^https?:\/\//, '')
+  // 只有回环地址才允许走明文 http(本地测试实例);其余一律 https ——
+  // devnet bootstrap 都是 TLS,origin 误配成 http:// 时按明文转发必然 EPROTO。
+  const loopback = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(hostPort)
+  const plain = raw.startsWith('http://') && loopback
   return BASE + '/xboot/' + (plain ? 'http/' : '') + hostPort
 }
 
@@ -69,7 +72,12 @@ async function _api(base, token, path, { method = 'GET', body } = {}) {
   }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const e = new Error(data.error || `HTTP ${res.status}`)
+    // 代理层的 502 带 target/detail —— 原样带出来,否则只剩一句
+    // "xboot-unreachable",看不出是连不上、协议不匹配还是对方没起服务
+    let msg = data.error || `HTTP ${res.status}`
+    if (data.detail) msg += ' (' + data.detail + ')'
+    if (data.target) msg += ' → ' + data.target
+    const e = new Error(msg)
     e.status = res.status
     throw e
   }

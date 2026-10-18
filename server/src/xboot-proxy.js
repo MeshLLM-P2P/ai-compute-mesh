@@ -93,34 +93,63 @@ export function attachXbootHttp(app) {
   })
 }
 
-function forwardHttp(req, res, { scheme, hostPort, tail }) {
+// 协议不匹配的特征错误:明文打 TLS 端口(EPROTO/wrong version number),
+// 或 TLS 打明文端口(连接被重置)。命中时换一种 scheme 重试一次。
+const PROTO_ERR = /EPROTO|WRONG_VERSION|ECONNRESET|EPIPE/
+
+function forwardHttp(req, res, target) {
+  const { hostPort, tail } = target
   const { host, port } = splitHostPort(hostPort)
-  const mod = scheme === 'http' ? http : https
-  console.log('[xboot] ' + req.method + ' ' + scheme + '://' + hostPort + tail.slice(0, 90))
-  const opts = {
-    host,
-    port,
-    path: tail,
-    method: req.method,
-    headers: { ...filterHeaders(req.headers), host: hostPort },
-    rejectUnauthorized: false, // devnet 自签证书:信任模型由 E2EE 承担,不是 TLS 层
+  const method = req.method
+  // 只有无 body 的方法能安全重试(GET/HEAD);POST 的流已被消费,重试会发空体
+  const canRetry = method === 'GET' || method === 'HEAD'
+  let retried = false
+  let finished = false
+
+  const attempt = (scheme) => {
+    const mod = scheme === 'http' ? http : https
+    console.log('[xboot] ' + method + ' ' + scheme + '://' + hostPort + tail.slice(0, 90))
+    const upstream = mod.request(
+      {
+        host,
+        port,
+        path: tail,
+        method,
+        headers: { ...filterHeaders(req.headers), host: hostPort },
+        rejectUnauthorized: false, // devnet 自签证书:信任模型由 E2EE 承担,不是 TLS 层
+      },
+      (up) => {
+        finished = true
+        res.writeHead(up.statusCode || 502, filterHeaders(up.headers))
+        up.pipe(res)
+      }
+    )
+    upstream.setTimeout(30000, () => upstream.destroy(new Error('xboot-timeout')))
+    upstream.on('error', (e) => {
+      if (finished) return
+      const code = e.code || ''
+      // 联邦 origin 可能被配成 http:// 而对方其实是 TLS:自动换 scheme 重试,
+      // 否则用户只会看到一句无从下手的 xboot-unreachable。
+      if (!retried && canRetry && PROTO_ERR.test(code + ' ' + (e.message || ''))) {
+        retried = true
+        attempt(scheme === 'http' ? 'https' : 'http')
+        return
+      }
+      finished = true
+      if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'application/json' })
+      // target/detail 会原样带到前端日志,便于一眼定位(连不上 / 协议不符 / 超时)
+      res.end(
+        JSON.stringify({
+          error: 'xboot-unreachable',
+          target: scheme + '://' + hostPort,
+          detail: code || e.message,
+        })
+      )
+    })
+    if (canRetry) upstream.end()
+    else req.pipe(upstream)
   }
-  let done = false
-  const upstream = mod.request(opts, (up) => {
-    done = true
-    res.writeHead(up.statusCode || 502, filterHeaders(up.headers))
-    up.pipe(res)
-  })
-  upstream.setTimeout(30000, () => upstream.destroy(new Error('xboot-timeout')))
-  upstream.on('error', (e) => {
-    if (done) return
-    done = true
-    if (!res.headersSent) {
-      res.writeHead(502, { 'Content-Type': 'application/json' })
-    }
-    res.end(JSON.stringify({ error: 'xboot-unreachable', target: scheme + '://' + hostPort, detail: e.code || e.message }))
-  })
-  req.pipe(upstream)
+  attempt(target.scheme)
 }
 
 // WS 转发:由 index.js 的唯一 upgrade 分发器在命中 /xboot/ 时调用
