@@ -145,13 +145,6 @@ export async function startConsumerCall({
     const preKx = []
     let transportChosen = false
     let kxStarted = false
-    // [跨网段] 不等 accept、不试直连:立刻开 /dc 中转(经本机 bootstrap 转发)。
-    // provider 收到 transport=['relay'] 也会同步开中转,双方在 sess 房间会合。
-    if (preferRelay) {
-      transportChosen = true
-      log('跨网段调用:直接使用 /dc 中转通道')
-      openRelayChannel()
-    }
     // 帧链:逐帧串行「解密+处理」,保证处理序=到达序。
     // WebCrypto decrypt 的完成序不受提交序保证,并行 .then 曾在冷启动窗口
     // 把 token 块乱序拼接(transcript 哈希分歧的根因,见 PLAN.md)。
@@ -309,6 +302,16 @@ export async function startConsumerCall({
       } else {
         openRelayChannel()
       }
+    }
+
+    // [跨网段] 不等 accept、不试直连:立刻开 /dc 中转(经本机 bootstrap 转发)。
+    // provider 收到 transport=['relay'] 也会同步开中转,双方在 sess 房间会合。
+    // 注意:必须放在 handleFrame / openRelayChannel 定义之后 —— 它们是 const/函数
+    // 声明,提前调用会踩 TDZ("Cannot access 'handleFrame' before initialization")。
+    if (preferRelay) {
+      transportChosen = true
+      log('跨网段调用:直接使用 /dc 中转通道')
+      openRelayChannel()
     }
 
     // 等 provider accept;6s 无应答(旧版本 provider)默认 relay
