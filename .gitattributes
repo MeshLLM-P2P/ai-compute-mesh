@@ -1,0 +1,16 @@
+# 换行符策略 —— 不依赖每个人的 core.autocrlf 设置。
+#
+# cmd.exe 对 LF-only 的 .bat 行为不可靠(尤其 call/goto/parenthesised block),
+# 所以批处理在仓库里就钉死 CRLF,谁克隆都一样。
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell 脚本必须 LF,否则 Linux/macOS 上会报 bad interpreter
+*.sh text eol=lf
+
+# 二进制,不要碰
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
