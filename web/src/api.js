@@ -131,6 +131,19 @@ export async function loginRemote(base, wallet) {
   return session
 }
 
+// [TURN] ICE 配置:服务端 GET /ice 下发(STUN 公开,TURN 凭据需登录)。
+// 模块级缓存 —— 一次会话内不会变;失败时退化为公共 STUN,不影响本地调用。
+let iceCache = null
+export async function getIceConfig() {
+  if (iceCache) return iceCache
+  try {
+    iceCache = await api('/ice')
+  } catch {
+    iceCache = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], hasTurn: false }
+  }
+  return iceCache
+}
+
 // [P1 可观测] 单会话/listing 时间线(服务器视角):events + dc 统计
 // client 可选:跨 bootstrap 调用时传远程 bootstrap 的 API 客户端
 export async function getConversation(consumer, listingId, sessionId, client) {

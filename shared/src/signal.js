@@ -219,6 +219,9 @@ export function openRtcChannel({
   onDead,
   timeoutMs = 6000,
   stunUrls,
+  // 完整 ICE 配置(由服务端 GET /ice 下发):[{urls:[...]}, {urls:[turn...],username,credential}]
+  // 传了就用它(含 TURN);没传则退化为单个 STUN。
+  iceServers,
 }) {
   const dbg = (s) => {
     try {
@@ -256,7 +259,10 @@ export function openRtcChannel({
   }
 
   pc = new RTCPeerConnection({
-    iceServers: [{ urls: stunUrls || DEFAULT_STUN }],
+    iceServers:
+      Array.isArray(iceServers) && iceServers.length
+        ? iceServers
+        : [{ urls: stunUrls || DEFAULT_STUN }],
   })
   pc.onicecandidate = (e) => {
     if (e.candidate) signal.sendTo(room, { t: 'ice', candidate: e.candidate.toJSON() })

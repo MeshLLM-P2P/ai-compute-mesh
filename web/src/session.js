@@ -23,7 +23,7 @@ import {
   runBackend,
   cachedTokensOf,
 } from '@mesh/shared/channel'
-import { api, SERVER, SIGNAL_URL, getSession, makeApi, wsUrlOf, browserBase } from './api.js'
+import { api, SERVER, SIGNAL_URL, getSession, makeApi, wsUrlOf, browserBase, getIceConfig } from './api.js'
 
 // ---------- consumer orchestrator ------------------------------------------
 
@@ -54,6 +54,10 @@ export async function startConsumerCall({
   // [跨 bootstrap] 远程 base 归一化:https 页面下的 http:// 升级为 https://
   // (混合内容策略会拦掉),信令/中继/结算与对面保持一致
   if (serverBase) serverBase = browserBase(serverBase)
+  // [TURN] 有 TURN 时跨网段也能直连(TURN 只中继 ICE 流量,DTLS/E2EE 端到端);
+  // 没有 TURN 时跨网段打洞保不住(5s 掉线),直接走中转。
+  const ice = await getIceConfig()
+  const relayOnly = preferRelay && !ice.hasTurn
   const signalUrl = serverBase ? wsUrlOf(serverBase) : SIGNAL_URL
   const apiFn = serverBase ? makeApi(serverBase, sessionToken).api : api
   const signal = new SignalClient(signalUrl)
@@ -119,12 +123,12 @@ export async function startConsumerCall({
       consumerPub: wallet.address,
       // [阶段2 WebRTC] transport 能力声明:浏览器优先直连,provider 按自己
       // 能力(有无 RTCPeerConnection)在 accept 里回选;不回复/旧版本 = relay。
-      // [跨网段] preferRelay 时只声明 relay,provider 直接开中转通道。
-      transport: preferRelay ? ['relay'] : ['rtc', 'relay'],
+      // [跨网段] 无 TURN 时只声明 relay(直连保不住);有 TURN 则照常尝试直连。
+      transport: relayOnly ? ['relay'] : ['rtc', 'relay'],
     })
     log(
-      preferRelay
-        ? 'offer sent (transport=relay,跨网段直连不稳定),等待 provider accept…'
+      relayOnly
+        ? 'offer sent (transport=relay,无 TURN 跨网段直连不稳定),等待 provider accept…'
         : 'offer sent (transport=rtc,relay),等待 provider accept…'
     )
     // 2) session room on /signal:busy 通知仍走信令房间(控制帧)
@@ -259,6 +263,7 @@ export async function startConsumerCall({
           onFrame: handleFrame,
           onDead: handleDead,
           timeoutMs: 6000,
+          iceServers: ice.iceServers,
         })
       } catch (e) {
         fallbackToRelay()
@@ -304,11 +309,11 @@ export async function startConsumerCall({
       }
     }
 
-    // [跨网段] 不等 accept、不试直连:立刻开 /dc 中转(经本机 bootstrap 转发)。
+    // [跨网段] 无 TURN:不等 accept、不试直连,立刻开 /dc 中转(经本机转发)。
     // provider 收到 transport=['relay'] 也会同步开中转,双方在 sess 房间会合。
     // 注意:必须放在 handleFrame / openRelayChannel 定义之后 —— 它们是 const/函数
     // 声明,提前调用会踩 TDZ("Cannot access 'handleFrame' before initialization")。
-    if (preferRelay) {
+    if (relayOnly) {
       transportChosen = true
       log('跨网段调用:直接使用 /dc 中转通道')
       openRelayChannel()
@@ -661,6 +666,8 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
     const consumerPub = bs58.decode(m.consumerPub)
     // [诊断] offer 是否带 transport 声明:一眼区分 consumer 是新代码还是旧缓存
     log('call offer received: transport=' + JSON.stringify(m.transport || null))
+    // [TURN] provider 侧同样需要 ICE 配置(含 TURN 凭据)才能分配中继候选
+    const ice = await getIceConfig()
     activeCount++
     activeSessions.add(sessionId)
     const call = {
@@ -813,6 +820,7 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
           onFrame: handleFrame,
           onDead: handleDead,
           timeoutMs: 6000,
+          iceServers: ice.iceServers,
         })
       } catch (e) {
         fallbackToRelay()

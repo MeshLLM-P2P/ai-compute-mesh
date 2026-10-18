@@ -13,6 +13,7 @@ import { createPeers } from './peers.js'
 import { createFederation } from './federation.js'
 import { createEscrow, EscrowError } from './escrow.js'
 import { attachXbootHttp, xbootUpgrade, XBOOT_PREFIX } from './xboot-proxy.js'
+import { buildIceConfig } from './ice.js'
 import { mockLlmRouter } from './mockllm.js'
 import {
   AGENT_CONFIG_PATH,
@@ -99,6 +100,14 @@ app.get('/referral/code/:code', (req, res) => {
     capRaw: info.capRaw,
   })
 })
+// [TURN] ICE 配置下发:STUN 公开;TURN 凭据只给已登录会话(避免匿名白嫖带宽)。
+// web 端在建立 WebRTC 前取一次(模块级缓存),据此决定"直连优先"还是"直接中转"。
+app.get('/ice', (req, res) => {
+  const token = req.headers['x-mesh-session']
+  const wallet = token ? auth.resolveWallet(token) : null
+  res.json(buildIceConfig(CONFIG, { authed: !!wallet }))
+})
+
 app.get('/referral', auth.requireSession, (req, res) => {
   const info = escrow.getReferralInfo(req.wallet)
   // 本人作为推荐人: 累计已得返利 + 拉到的消费者累计贡献

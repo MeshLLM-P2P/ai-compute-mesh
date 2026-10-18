@@ -19,6 +19,8 @@ export default function ConfigPanel({ wallet, pushLog }) {
   const [fed, setFed] = useState([])
   const [fedInput, setFedInput] = useState('')
   const [fedSaving, setFedSaving] = useState(false)
+  // [TURN] 当前 ICE 配置(服务端下发):有 TURN 时跨网段才会尝试直连
+  const [ice, setIce] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -43,6 +45,9 @@ export default function ConfigPanel({ wallet, pushLog }) {
     load()
     api('/federation')
       .then((r) => setFed(r.bootstraps || []))
+      .catch(() => {})
+    api('/ice')
+      .then(setIce)
       .catch(() => {})
   }, [load])
 
@@ -313,6 +318,36 @@ export default function ConfigPanel({ wallet, pushLog }) {
         <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
           提示:让两台机器互相看到对方,两台都要把对方的地址加进来(双向同步)。
           环境变量 MESH_PEER_BOOTSTRAPS 设置的地址会自动并入,不可在此删除。
+        </p>
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>6) ICE / TURN(跨网段直连)</h3>
+        <p className="muted" style={{ fontSize: 12 }}>
+          同网段/同机:WebRTC 直连,数据面不经服务器。跨网段:没有 TURN 时打洞虽能连上,
+          但 NAT 映射保不住(约 5 秒后掉线),因此自动走 /dc 中转;配置 TURN 后恢复
+          「直连优先、失败才降级」。TURN 只中继 ICE 流量,DTLS/E2EE 仍端到端。
+        </p>
+        <div className="mono" style={{ fontSize: 12, lineHeight: 1.9 }}>
+          状态:{' '}
+          {!ice ? (
+            <span className="muted">读取中…</span>
+          ) : ice.hasTurn ? (
+            <span style={{ color: 'var(--ok)' }}>TURN 已启用(跨网段直连优先)</span>
+          ) : ice.turnConfigured ? (
+            <span style={{ color: 'var(--warn, #c90)' }}>TURN 已配置但当前会话未取到凭据(需登录)</span>
+          ) : (
+            <span className="muted">仅 STUN(跨网段走中转)</span>
+          )}
+          <br />
+          STUN: {(ice?.iceServers?.find((s) => String(s.urls).includes('stun'))?.urls || []).join(', ') || '—'}
+          <br />
+          TURN:{' '}
+          {(ice?.iceServers?.filter((s) => String(s.urls).includes('turn')).flatMap((s) => s.urls) || []).join(', ') || '—'}
+        </div>
+        <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+          配置方式(服务端环境变量):MESH_TURN_URLS、MESH_TURN_USERNAME、MESH_TURN_CREDENTIAL。
+          部署示例见仓库 docs/turn.md(coturn + docker)。
         </p>
       </div>
     </div>

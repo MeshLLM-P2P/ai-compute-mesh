@@ -45,6 +45,16 @@ export const CONFIG = {
   // 对端 /peers 返回的节点若 origin 等于本 URL,说明是本节点的联邦副本
   // 被传了回来,跳过不再收录(leave 后不留幽灵节点)。不设 = 禁用防护。
   selfUrl: process.env.MESH_SELF_URL || '',
+  // ---- ICE / TURN(跨网段直连) ----------------------------------------------
+  // 没有 TURN 时跨网段打洞虽能连上,但 NAT 映射保不住(实测 ICE consent 5s
+  // 后失效),web 端因此对跨网段调用默认走 /dc 中转。配置 TURN 后自动改回
+  // "直连优先、失败才降级"。TURN 只做 ICE 层中继,DTLS/E2EE 仍端到端。
+  stunUrls: process.env.MESH_STUN_URLS || 'stun:stun.l.google.com:19302',
+  // 逗号分隔,如:
+  //   MESH_TURN_URLS=turn:turn.example.com:3478?transport=udp,turns:turn.example.com:5349
+  turnUrls: process.env.MESH_TURN_URLS || '',
+  turnUsername: process.env.MESH_TURN_USERNAME || '',
+  turnCredential: process.env.MESH_TURN_CREDENTIAL || '',
   defaultBondRaw: 100_000_000, // 100 USDT in micro-USDT
   // Test accounts (sim ledger): wallets that never had a balance get this credit
   // on first verified login. Only meaningful in settleMode 'sim'.

@@ -29,7 +29,8 @@ test('preferRelay 分支必须位于 handleFrame / openRelayChannel 定义之后
   }
   const handleFrame = at(/const handleFrame\s*=/)
   const openRelay = at(/function openRelayChannel\s*\(/)
-  const prefer = at(/if \(preferRelay\) \{/)
+  // 分支名可能是 preferRelay(语义开关)或 relayOnly(叠加 TURN 判断后的结果)
+  const prefer = at(/if \((preferRelay|relayOnly)\) \{/)
   assert.ok(handleFrame > 0, '未找到 handleFrame 定义')
   assert.ok(openRelay > 0, '未找到 openRelayChannel 定义')
   assert.ok(prefer > 0, '未找到 preferRelay 分支')
