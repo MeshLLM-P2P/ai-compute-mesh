@@ -1,0 +1,15 @@
+{
+  "name": "@mesh/turn",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MeshLLM 联调用的 TURN 服务(纯 JS,无需 Docker/coturn)",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "selftest": "node selftest.mjs"
+  },
+  "dependencies": {
+    "turn-server": "^0.8.0"
+  }
+}

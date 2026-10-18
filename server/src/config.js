@@ -1,3 +1,6 @@
+// 必须是第一条 import:在读取下面任何 process.env 之前把 server/.env 合并进来
+// (已存在的环境变量优先,.env 只补空缺)。没有 .env 时零影响。
+import './env.js'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 

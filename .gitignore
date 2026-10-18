@@ -45,6 +45,9 @@ certs/*.key
 .env
 .env.*
 *.env
+# 示例模板要进仓库,否则新人不知道有哪些配置项
+!.env.example
+!*.env.example
 # WorkBuddy 工作数据目录
 .workbuddy-ai/
 .workbuddy/

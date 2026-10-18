@@ -16,7 +16,9 @@
     "build": "npm run build -w web",
     "test": "npm run test -w shared && npm run test -w server",
     "start": "npm run dev",
-    "setup": "npm install"
+    "setup": "npm install",
+    "turn": "node turn/server.mjs",
+    "turn:selftest": "node turn/selftest.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.0"

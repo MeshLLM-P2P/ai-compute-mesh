@@ -15,7 +15,12 @@ const _proto = (typeof location !== 'undefined' && location.protocol) || 'http:'
 const BASE = _proto + '//' + _host + ':4011'
 
 let sessionToken = null
+// [TURN] ICE 配置缓存。必须随会话变化失效 —— TURN 凭据只下发给已登录会话,
+// 若在登录前就把 /ice 结果缓存住,整个页面会永远 hasTurn:false,
+// 跨网段调用就一直退化成中转。所以 setSession 时清空。
+let iceCache = null
 export function setSession(token) {
+  if (token !== sessionToken) iceCache = null
   sessionToken = token
 }
 export function getSession() {
@@ -132,16 +137,16 @@ export async function loginRemote(base, wallet) {
 }
 
 // [TURN] ICE 配置:服务端 GET /ice 下发(STUN 公开,TURN 凭据需登录)。
-// 模块级缓存 —— 一次会话内不会变;失败时退化为公共 STUN,不影响本地调用。
-let iceCache = null
+// 成功结果按会话缓存(见 setSession);失败不缓存 —— 一次网络抖动不该让
+// 整个页面永久失去 TURN,退化为公共 STUN 继续跑。
 export async function getIceConfig() {
   if (iceCache) return iceCache
   try {
     iceCache = await api('/ice')
+    return iceCache
   } catch {
-    iceCache = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], hasTurn: false }
+    return { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], hasTurn: false }
   }
-  return iceCache
 }
 
 // [P1 可观测] 单会话/listing 时间线(服务器视角):events + dc 统计
