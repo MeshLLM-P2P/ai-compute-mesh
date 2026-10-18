@@ -494,6 +494,7 @@ export async function startConsumerCall({
     })
     set('settled', { escrow })
     close()
+    return escrow
   }
 
   // 多轮对话收尾:通知 provider 结束并发最终回执(覆盖全部轮次累计量)。

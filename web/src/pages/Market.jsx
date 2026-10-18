@@ -492,11 +492,23 @@ export default function Market({ wallet, pushLog }) {
     if (!call?.session) return
     setCall((c) => ({ ...c, acting: true }))
     try {
-      await call.session.settle()
+      const esc = await call.session.settle()
+      // 结算完成要有明确回执:否则界面只剩状态文字,用户会以为没反应
+      if (esc && esc.tx) {
+        pushLog(
+          '已结算:总额 ' + fmtUsd(esc.tx.amountRaw) + ' · Provider 实收 ' + fmtUsd(esc.tx.providerRaw)
+        )
+      } else {
+        pushLog('已结算(SETTLED)')
+      }
       loadBalance()
     } catch (e) {
       pushLog('结算失败: ' + e.message)
       setCall((c) => ({ ...c, acting: false, state: { status: 'error', error: e.message } }))
+    } finally {
+      // 成功路径也必须复位 acting —— 漏了这步按钮会永远停在「处理中…」,
+      // 现象就是"卡在结算了"(其实服务端早已 SETTLED)。
+      setCall((c) => ({ ...c, acting: false }))
     }
   }
 
@@ -805,15 +817,17 @@ export default function Market({ wallet, pushLog }) {
                 <br />
                 回执签名: <span className="muted">已验证 ✓(Provider 钱包)</span>
               </div>
-              <div className="row" style={{ marginTop: 10 }}>
-                <button onClick={acceptAndSettle} disabled={call.acting}>
-                  接受并结算(双签)
-                </button>
-                <button className="danger" onClick={dispute} disabled={call.acting}>
-                  发起争议
-                </button>
-                {call.acting && <span className="muted">处理中…</span>}
-              </div>
+              {st?.status !== 'settled' && (
+                <div className="row" style={{ marginTop: 10 }}>
+                  <button onClick={acceptAndSettle} disabled={call.acting}>
+                    接受并结算(双签)
+                  </button>
+                  <button className="danger" onClick={dispute} disabled={call.acting}>
+                    发起争议
+                  </button>
+                  {call.acting && <span className="muted">处理中…</span>}
+                </div>
+              )}
               {st?.status === 'settled' && st.escrow?.tx && (
                 <p style={{ color: 'var(--ok)', marginTop: 8 }}>
                   已结算:总额 {fmtUsd(st.escrow.tx.amountRaw)} = Provider 实收 {fmtUsd(st.escrow.tx.providerRaw)}
