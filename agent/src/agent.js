@@ -13,7 +13,7 @@ import {
   b64encode,
 } from '@mesh/shared/protocol'
 import { SignalClient, openDcChannel } from '@mesh/shared/signal'
-import { KxSession, encodeEncrypted, decodeEncrypted, runBackend, cachedTokensOf } from '@mesh/shared/channel'
+import { KxSession, encodeEncrypted, decodeEncrypted, runBackend, cachedTokensOf, usageTokensOf } from '@mesh/shared/channel'
 
 // wsBase:形如 wss://192.168.2.108:4011(不含路径);
 // SignalClient 内部拼 /signal,openDcChannel 内部拼 /dc
@@ -121,6 +121,7 @@ export function startNodeAgent({ wsBase, listing, wallet, apiKey, env, log, onCa
       tokensIn: 0,
       tokensOut: 0,
       tokensCache: 0,
+      meteringSource: null,
       busy: false,
     }
     activeCalls.add(call)
@@ -220,7 +221,11 @@ export function startNodeAgent({ wsBase, listing, wallet, apiKey, env, log, onCa
     })
     const digest = await receiptDigest(payload)
     const signature = b64encode(await wallet.signMessage(digest))
-    await sendEncryptedFor(call, { t: 'receipt', receipt: { ...payload, signature } })
+    // meteringSource 不进 receiptPayloadForHash(不影响签名),仅供审计
+    await sendEncryptedFor(call, {
+      t: 'receipt',
+      receipt: { ...payload, meteringSource: call.meteringSource || 'estimate', signature },
+    })
     onCall && onCall({ sessionId: call.sessionId, phase: 'receipt-sent' })
   }
 
@@ -244,7 +249,8 @@ export function startNodeAgent({ wsBase, listing, wallet, apiKey, env, log, onCa
       call.busy = true
       try {
         call.history.push({ role: 'user', content: prompt })
-        call.tokensIn += turnInputEstimate(call.history)
+        // 兜底估算;后端报了真实 usage 就用真值替换(见下)
+        const estIn = turnInputEstimate(call.history)
         log(
           'prompt received (turn ' +
             Math.ceil(call.history.length / 2) +
@@ -264,9 +270,18 @@ export function startNodeAgent({ wsBase, listing, wallet, apiKey, env, log, onCa
             sendEncryptedFor(call, { t: 'token', chunk }).catch(() => {})
           },
         })
+        // 计费口径:优先后端上报的真实 usage。估算对中文严重偏低
+        // (1 字≈1 token,估算按 4 字符/token),一律用估算会系统性少收。
+        const u = usageTokensOf(usage)
+        const realIn = u && u.tokensIn != null
+        const realOut = u && u.tokensOut != null
+        call.tokensIn += realIn ? u.tokensIn : estIn
         call.history.push({ role: 'assistant', content: full })
-        call.tokensOut += estimateTokens(full)
+        call.tokensOut += realOut ? u.tokensOut : estimateTokens(full)
         call.tokensCache += cachedTokensOf(usage)
+        const turnSrc = realIn && realOut ? 'usage' : realIn || realOut ? 'mixed' : 'estimate'
+        call.meteringSource =
+          call.meteringSource == null || call.meteringSource === turnSrc ? turnSrc : 'mixed'
         sendEncryptedFor(call, { t: 'token', chunk: '', done: true }).catch(() => {})
         call.busy = false
         onCall && onCall({ sessionId: call.sessionId, phase: 'turn-done' })

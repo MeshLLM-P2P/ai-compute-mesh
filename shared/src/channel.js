@@ -243,6 +243,29 @@ export function cachedTokensOf(usage) {
   return Number.isFinite(v) ? v : 0
 }
 
+// 真实用量归一化 —— 计费的**首选**数据源,估算只在后端不报 usage 时兜底。
+//
+// 两种后端形状完全不同,统一成 { tokensIn, tokensOut }:
+//   OpenAI     : prompt_tokens / completion_tokens
+//   Anthropic  : input_tokens  / output_tokens(message_delta 里是累计值)
+//
+// 两个值都可能缺一半(例如只回了 output_tokens),所以逐字段回退而不是整体回退。
+// 完全拿不到 → null,调用方据此走估算。
+export function usageTokensOf(usage) {
+  if (!usage || typeof usage !== 'object') return null
+  const pick = (...keys) => {
+    for (const k of keys) {
+      const v = usage[k]
+      if (Number.isFinite(v) && v >= 0) return v
+    }
+    return null
+  }
+  const tokensIn = pick('prompt_tokens', 'input_tokens')
+  const tokensOut = pick('completion_tokens', 'output_tokens')
+  if (tokensIn == null && tokensOut == null) return null
+  return { tokensIn, tokensOut }
+}
+
 // 'echo' 后端:确定性回复,保证 devnet 无真实模型时全流程可跑通
 export function echoReply(prompt, model) {
   return [

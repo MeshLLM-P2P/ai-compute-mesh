@@ -156,8 +156,17 @@ Consumer 浏览器                Provider 浏览器(可以是另一台机器)
   EscrowPanel 回执行加缓存数、交易行加分账、头部显示平台费用账本;
   新端点 `GET /platform/fees`。
 - 测试:protocol 9/9、server escrow 11/11(含缓存计费、分账断言)。
-- 注意:provider 回执 token 仍是**估算**(chars/4),缓存数是后端真值;
-  后端不支持 include_usage 时缓存=0 自动退回输入价计费。
+- **10/20 计费口径修正**:provider 回执的 `tokensIn/tokensOut` 改为**优先后端
+  上报的真实 usage**(OpenAI `prompt_tokens/completion_tokens`,Anthropic
+  `input_tokens/output_tokens`),拿不到才回退 chars/4 估算(`usageTokensOf`)。
+  原因:估算对中文严重偏低(1 字≈1 token,估算按 4 字符/token,系统性少收 4~6 倍)。
+  同时 consumer 侧校验从「与自身估算 ±5% 双向比对」改为**单边上限**
+  (`checkMeteringBounds`,上限 = 字符数 × 2 + 每消息 16 token):
+  真实用量必然落在旧容差外,不改会误杀正确回执。`transcriptHash` 仍严格校验
+  (防伪造对话);token 精确值客户端无法验证,provider 可信度靠押金+信誉+争议兜底。
+  回执新增 `meteringSource`(usage/estimate/mixed,不进签名摘要)供审计。
+- 注意:后端不支持 `include_usage`(或 Anthropic 不回 usage)时自动回退估算;
+  缓存数始终取后端真值,不报则为 0(按普通输入计费)。
 
 ### 3.5 多轮连续对话(09/19 晚,已实现)
 

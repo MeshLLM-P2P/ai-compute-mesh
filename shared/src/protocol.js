@@ -106,6 +106,94 @@ export function turnInputEstimate(messages) {
   return n
 }
 
+// 第 i 轮输入的**字符数** —— 与 turnInputEstimate 完全同口径,只是不除以 4。
+// 用于"真实用量"的单边上限判定:估算口径与真实分词器差距太大(中文 1 字≈1 token,
+// 按 4 字符/token 估会低 4~6 倍),不能用估算做双向比对,只能卡上限。
+export function turnInputChars(messages) {
+  let n = 0
+  for (const m of messages) n += m && m.content ? String(m.content).length : 0
+  return n
+}
+
+// 真实分词器的保守上限:没有任何主流 tokenizer 会把 1 个字符切成超过 2 个 token
+// (中文≈1~1.5,英文≈0.25,emoji 最坏约 3~4 字节但字符数按 UTF-16 计)。
+export const METERING_MAX_TOKENS_PER_CHAR = 2
+
+// 每条消息的对话模板开销(role 标记 / 分隔符),主流后端每条约 3~8 token,
+// 这里取 16 留足余量 —— 宁可放过,也不误杀合法调用。
+export const METERING_TEMPLATE_TOKENS = 16
+
+// 后端自带的 system 提示词**不在 transcript 里**,却会计入 prompt_tokens。
+// 所以输入侧必须额外给一笔固定余量,否则短提示词的真实用量会被硬上限误杀
+// (实测:LM Studio 这类后端会给每个请求加一段系统模板)。
+// listing 可用 metering.inputOverheadTokens 覆盖这个默认值。
+export const METERING_INPUT_OVERHEAD_TOKENS = 512
+
+export function tokenCeiling(chars, extra = 0) {
+  const n = Number(chars)
+  const pad = Number.isFinite(Number(extra)) && Number(extra) > 0 ? Number(extra) : 0
+  if (!Number.isFinite(n) || n <= 0) return Math.ceil(pad)
+  return Math.ceil(n * METERING_MAX_TOKENS_PER_CHAR) + Math.ceil(pad)
+}
+
+// 回执计费口径校验(纯函数,便于单测)。
+//
+// 历史:早期 provider 只报字符估算(chars/4),consumer 拿同一估算做 ±5% 双向比对。
+// 改成真实 usage 后这种比对必然误杀 —— 中文 1 字≈1 token,估算会低 4~6 倍,
+// 真实值直接落在容差外。
+//
+// 现在改成**单边上限**,两道闸:
+//   1) 文本长度上限:字符数 × 2 + 每消息模板开销 + 输入固定余量
+//   2) 模型硬上限:输入 ≤ model.context,输出 ≤ limits.maxTokens
+//      (provider 本来就把 max_tokens 传给后端,输出超过它本身就是违约)
+// 不设下限:少报是 provider 自己少收钱,不需要防。
+//
+// 注意这只是**合理性边界**,不是防作弊的证明 —— 客户端拿不到 tokenizer,
+// 无法精确复算。真正的锚点是 transcriptHash(防伪造对话)+ 押金/信誉/争议,
+// 且用户在「接受并结算」前会看到具体 token 数,可据此发起争议。
+export function checkMeteringBounds({
+  tokensIn,
+  tokensOut,
+  tokensCache = 0,
+  charsIn,
+  charsOut,
+  msgCount = 1,
+  inputOverhead = METERING_INPUT_OVERHEAD_TOKENS,
+  maxIn = 0,
+  maxOut = 0,
+}) {
+  const ti = Number(tokensIn)
+  const to = Number(tokensOut)
+  const tc = Number(tokensCache) || 0
+  if (!Number.isFinite(ti) || ti < 0) return { ok: false, reason: 'tokens-in-invalid' }
+  if (!Number.isFinite(to) || to < 0) return { ok: false, reason: 'tokens-out-invalid' }
+
+  const msgs = Math.max(1, Number(msgCount) || 1)
+  const pad = Number.isFinite(Number(inputOverhead)) && Number(inputOverhead) >= 0
+    ? Number(inputOverhead)
+    : METERING_INPUT_OVERHEAD_TOKENS
+  const charInCeil = tokenCeiling(charsIn, METERING_TEMPLATE_TOKENS * msgs + pad)
+  const modelInCeil = Number(maxIn) > 0 ? Number(maxIn) : Infinity
+  const inCeil = Math.min(charInCeil, modelInCeil)
+  if (ti > inCeil) {
+    return { ok: false, reason: 'tokens-in-over-ceiling', ceiling: inCeil, charCeiling: charInCeil }
+  }
+
+  const charOutCeil = tokenCeiling(charsOut, METERING_TEMPLATE_TOKENS)
+  const modelOutCeil = Number(maxOut) > 0 ? Number(maxOut) : Infinity
+  const outCeil = Math.min(charOutCeil, modelOutCeil)
+  if (to > outCeil) {
+    return { ok: false, reason: 'tokens-out-over-ceiling', ceiling: outCeil, charCeiling: charOutCeil }
+  }
+
+  // 缓存命中只能是输入的一部分。这里用上限而不是 ti 比较:
+  // 万一 ti 走的是估算、tc 走的是真实 usage,tc > ti 会误杀。
+  if (tc < 0) return { ok: false, reason: 'tokens-cache-invalid' }
+  if (tc > inCeil) return { ok: false, reason: 'tokens-cache-over-ceiling', ceiling: inCeil }
+
+  return { ok: true }
+}
+
 // ---------- pricing (integer micro-USDT, 1e-6 USDT) ----------
 
 export const RAW_PER_USDT = 1_000_000

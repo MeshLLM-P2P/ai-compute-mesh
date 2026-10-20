@@ -8,6 +8,8 @@ import {
   b64decode,
   estimateTokens,
   turnInputEstimate,
+  turnInputChars,
+  checkMeteringBounds,
   calcAmountRaw,
   transcriptHash,
   receiptPayloadForHash,
@@ -22,6 +24,7 @@ import {
   callParams,
   runBackend,
   cachedTokensOf,
+  usageTokensOf,
 } from '@mesh/shared/channel'
 import { api, SERVER, SIGNAL_URL, getSession, makeApi, wsUrlOf, browserBase, getIceConfig } from './api.js'
 
@@ -443,20 +446,39 @@ export async function startConsumerCall({
     const messages = []
     let ti = 0
     let to = 0
+    let charsIn = 0
+    let charsOut = 0
     for (const t of turns) {
       messages.push({ role: 'user', content: t.prompt })
       ti += turnInputEstimate(messages)
+      charsIn += turnInputChars(messages)
       messages.push({ role: 'assistant', content: t.reply })
       to += estimateTokens(t.reply)
+      charsOut += (t.reply || '').length
     }
     const myHash = await transcriptHash(sessionId, params, messages)
     if (r.transcriptHash !== myHash) throw new Error('transcript-hash-mismatch')
-    const tol = ((listing.metering && listing.metering.tolerancePct) || 5) / 100
-    if (Math.abs(r.tokensIn - ti) > ti * tol + 1) throw new Error('tokens-in-out-of-tolerance')
-    if (Math.abs(r.tokensOut - to) > to * tol + 1) throw new Error('tokens-out-out-of-tolerance')
-    // 缓存命中只能是输入的一部分(consumer 无法独立复算,只设上限防虚报)
+    // 计费口径:provider 现在优先报后端真实 usage,估算只是 fallback。
+    // 所以不能再拿自己的估算做双向比对 —— 中文 1 字≈1 token,真实用量是
+    // chars/4 估算的 4~6 倍,旧的 ±5% 容差会把**正确**的回执直接判死。
+    // 改成单边上限:只防虚报,不设下限(少报是 provider 自己少收钱)。
+    // transcriptHash 仍然是严格校验 —— 那才是防伪造对话的锚点。
     const tc = r.tokensCache || 0
-    if (tc < 0 || tc > ti * (1 + tol) + 1) throw new Error('tokens-cache-out-of-tolerance')
+    const metering = listing.metering || {}
+    const bounds = checkMeteringBounds({
+      tokensIn: r.tokensIn,
+      tokensOut: r.tokensOut,
+      tokensCache: tc,
+      charsIn,
+      charsOut,
+      msgCount: messages.length,
+      // 后端自带 system 提示词不在 transcript 里,给一笔固定余量(可用 listing 覆盖)
+      inputOverhead: metering.inputOverheadTokens,
+      // 模型硬上限:输入不超上下文窗口,输出不超 max_tokens(provider 已传给后端)
+      maxIn: (listing.model && listing.model.context) || 0,
+      maxOut: (listing.limits && listing.limits.maxTokens) || 0,
+    })
+    if (!bounds.ok) throw new Error(bounds.reason)
     const providerPub = bs58.decode(listing.provider)
     const digest = await receiptDigest(r)
     if (!ed25519Verify(providerPub, b64decode(r.signature), digest)) throw new Error('receipt-signature-invalid')
@@ -466,6 +488,7 @@ export async function startConsumerCall({
       tokensIn: r.tokensIn,
       tokensOut: r.tokensOut,
       tokensCache: tc,
+      meteringSource: r.meteringSource || 'estimate',
       myTokensIn: ti,
       myTokensOut: to,
       turns: turns.length,
@@ -686,6 +709,7 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
       tokensIn: 0,
       tokensOut: 0,
       tokensCache: 0,
+      meteringSource: null,
       busy: false,
     }
     activeCalls.add(call)
@@ -885,7 +909,12 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
     })
     const digest = await receiptDigest(payload)
     const signature = b64encode(await wallet.signMessage(digest))
-    await sendEncryptedFor(call, { t: 'receipt', receipt: { ...payload, signature } })
+    // meteringSource 不进 receiptPayloadForHash,所以不影响签名摘要;
+    // 它只是给 UI / 服务端日志看的"这单按什么口径计费"。
+    await sendEncryptedFor(call, {
+      t: 'receipt',
+      receipt: { ...payload, meteringSource: call.meteringSource || 'estimate', signature },
+    })
     onCall && onCall({ sessionId: call.sessionId, phase: 'receipt-sent' })
   }
 
@@ -909,8 +938,9 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
       call.busy = true
       try {
         call.history.push({ role: 'user', content: prompt })
-        // 本轮输入估算 = 发给后端的整段历史(后端每轮重放全部上下文)
-        call.tokensIn += turnInputEstimate(call.history)
+        // 本轮输入估算 = 发给后端的整段历史(后端每轮重放全部上下文)。
+        // 只是兜底值 —— 后端报了真实 usage 就用真值替换(见下)。
+        const estIn = turnInputEstimate(call.history)
         log(
           'prompt received (turn ' +
             Math.ceil(call.history.length / 2) +
@@ -930,9 +960,25 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
             sendEncryptedFor(call, { t: 'token', chunk }).catch(() => {})
           },
         })
+        // 计费口径:优先后端上报的真实 usage,拿不到才回退字符估算。
+        // 估算对中文严重偏低(1 字≈1 token,而估算按 4 字符/token),
+        // 之前一律用估算等于系统性少收 4~6 倍。
+        const u = usageTokensOf(usage)
+        const realIn = u && u.tokensIn != null
+        const realOut = u && u.tokensOut != null
+        call.tokensIn += realIn ? u.tokensIn : estIn
         call.history.push({ role: 'assistant', content: full })
-        call.tokensOut += estimateTokens(full)
+        call.tokensOut += realOut ? u.tokensOut : estimateTokens(full)
         call.tokensCache += cachedTokensOf(usage)
+        // 记来源,便于回执/UI 审计"这单按什么口径计费"。
+        // 各轮口径可能不同(后端某轮没回 usage),不同则记 mixed。
+        const turnSrc = realIn && realOut ? 'usage' : realIn || realOut ? 'mixed' : 'estimate'
+        call.meteringSource =
+          call.meteringSource == null || call.meteringSource === turnSrc ? turnSrc : 'mixed'
+        log(
+          'turn metering: in=' + (realIn ? u.tokensIn + '(usage)' : estIn + '(estimate)') +
+            ' out=' + (realOut ? u.tokensOut + '(usage)' : estimateTokens(full) + '(estimate)')
+        )
         // 轮结束(done)≠ 调用结束:consumer 可继续发下一条 prompt,
         // 或发 {t:'end'} 收尾出回执
         sendEncryptedFor(call, { t: 'token', chunk: '', done: true }).catch(() => {})

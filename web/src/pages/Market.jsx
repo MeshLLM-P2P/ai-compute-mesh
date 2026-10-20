@@ -20,6 +20,14 @@ function fmtLatency(ms) {
   return (ms / 1000).toFixed(1) + ' s'
 }
 
+// 计费口径说明:真实 usage 与字符估算可能差数倍(中文 1 字≈1 token,
+// 估算按 4 字符/token),不标清楚用户会以为 provider 虚报。
+function meteringLabel(src) {
+  if (src === 'usage') return '后端真实用量'
+  if (src === 'mixed') return '部分真实用量 / 部分估算'
+  return '字符估算(后端未上报 usage)'
+}
+
 // 按 listing 声明的上限估算"最坏情况"费用,保证托管永远够结算:
 // 输出按 limits.maxTokens(provider 端强制 max_tokens 截断),输入按模型上下文
 // 窗口,再留 20% 余量兜底后端轻微超限。旧逻辑只按 256+256 token 估算,
@@ -805,8 +813,11 @@ export default function Market({ wallet, pushLog }) {
           {call.verified && !call.verified.error && call.receipt && (
             <div className="card" style={{ marginTop: 12, background: 'var(--panel2)' }}>
               <div className="mono" style={{ fontSize: 12, lineHeight: 1.8 }}>
-                轮次: {call.verified.turns} · tokensIn: {call.verified.tokensIn} (本地 {call.verified.myTokensIn}) ·
-                缓存命中: {call.verified.tokensCache} · tokensOut: {call.verified.tokensOut} (本地 {call.verified.myTokensOut})
+                轮次: {call.verified.turns} · tokensIn: {call.verified.tokensIn} · 缓存命中:{' '}
+                {call.verified.tokensCache} · tokensOut: {call.verified.tokensOut}
+                <br />
+                计费口径: {meteringLabel(call.verified.meteringSource)} · 本地字符估算{' '}
+                {call.verified.myTokensIn} 入 / {call.verified.myTokensOut} 出(仅供参考)
                 <br />
                 应付(服务端按定价重算): <b>{fmtUsd(call.verified.amountRaw)}</b>
                 <br />
