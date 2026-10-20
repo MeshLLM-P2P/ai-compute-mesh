@@ -59,6 +59,23 @@ async function callApi(p, opts = {}) {
   }
 }
 
+// ---- ICE 配置(含 TURN 凭据):直连协商要用;取不到就只用内置 STUN ----
+// 缓存 5 分钟:跨网段调用时 provider 侧必须能拿到 TURN 才能分配中继候选,
+// 但每通电话都请求一次 /ice 没必要(TURN 凭据是静态长期凭据)。
+let iceCache = { at: 0, val: null }
+async function getIce() {
+  if (iceCache.val && Date.now() - iceCache.at < 5 * 60 * 1000) return iceCache.val
+  try {
+    const r = await callApi('/ice')
+    iceCache = { at: Date.now(), val: r }
+    if (r && r.hasTurn) log('ICE: TURN 已配置(' + (r.iceServers || []).length + ' 组),可跨网段中继')
+    return r
+  } catch (e) {
+    log('ice config fetch failed: ' + e.message)
+    return iceCache.val || { iceServers: [], hasTurn: false }
+  }
+}
+
 // ---- 采用 listings(必须是本钱包名下) ----
 // 启动重试:server 未就绪(网络层错误/超时)时等 5s 重试,最多 120 次(10 分钟),
 // 进程不退出——开机竞态下 agent 自己就能等 server;server 的确定性响应
@@ -99,6 +116,8 @@ if (entries.length === 0) {
 }
 
 // ---- 每个 listing 一个无头 agent ----
+// 预热 ICE 缓存(直连协商要立刻用,不能等第一通电话才去取)
+await getIce().catch(() => {})
 const agents = []
 for (const { listing, apiKey } of entries) {
   agents.push(
@@ -108,6 +127,9 @@ for (const { listing, apiKey } of entries) {
       wallet,
       apiKey,
       env: { serverBase: base, allowRelay: false },
+      getIce,
+      // config.rtc === false → 强制中转(排障用)
+      rtcEnabled: cfg.rtc !== false,
       log: (s) => log('[' + listing.model.name + '] ' + s),
       onCall: (info) => log('[' + listing.model.name + '] call ' + info.sessionId.slice(0, 8) + ' ' + info.phase),
       onCallEnd: (info) =>

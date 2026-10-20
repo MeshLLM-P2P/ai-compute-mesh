@@ -265,7 +265,9 @@ export async function startConsumerCall({
           log: (s) => log('rtc: ' + s),
           onFrame: handleFrame,
           onDead: handleDead,
-          timeoutMs: 6000,
+          // 直连建连预算:host候选的 WebRTC 握手实测可达 ~10s,
+          // 给 15s 余量(跨网段 TURN 可能更慢),避免误判失败回退中转
+          timeoutMs: 15000,
           iceServers: ice.iceServers,
         })
       } catch (e) {
@@ -843,7 +845,9 @@ export function startProviderAgent({ listing, wallet, log, onCall, onCallEnd, ap
           log: (s) => log('rtc: ' + s),
           onFrame: handleFrame,
           onDead: handleDead,
-          timeoutMs: 6000,
+          // 直连建连预算:host候选的 WebRTC 握手实测可达 ~10s,
+          // 给 15s 余量(跨网段 TURN 可能更慢),避免误判失败回退中转
+          timeoutMs: 15000,
           iceServers: ice.iceServers,
         })
       } catch (e) {

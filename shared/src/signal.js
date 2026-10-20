@@ -207,8 +207,23 @@ export function openDcChannel({ url, room, onFrame, onDead, log, socketFactory }
 //              answer → ICE ↔ → DC open → ready
 // 任一侧 ready 超时(默认 6s):调用方回退 /dc(见 session.js)。
 //
-// Node 无 RTCPeerConnection 时不构造本通道(调用方检测后直接走 relay)。
+// RTC 实现注入(阶段 2b:无头节点):
+//   浏览器  —— 不传 rtcImpl,用全局 RTCPeerConnection(行为与之前完全一致)
+//   无头 Node —— 传 { RTCPeerConnection } from 'werift'(纯 TS 实现,无原生依赖)
+// 只依赖 RTCPeerConnection 一个符号:setRemoteDescription/addIceCandidate 均按
+// W3C 字典({type,sdp} / {candidate,...})传参,浏览器与 werift 都接受。
 const DEFAULT_STUN = 'stun:stun.l.google.com:19302'
+
+export function resolveRtcImpl(rtcImpl) {
+  if (rtcImpl && typeof rtcImpl.RTCPeerConnection === 'function') return rtcImpl
+  if (typeof RTCPeerConnection !== 'undefined') return { RTCPeerConnection }
+  return null
+}
+
+// 供调用方在协商前判断"本端能不能直连"(浏览器恒 true;无头 Node 取决于注入)
+export function isRtcAvailable(rtcImpl) {
+  return !!resolveRtcImpl(rtcImpl)
+}
 
 export function openRtcChannel({
   signal,
@@ -217,11 +232,13 @@ export function openRtcChannel({
   log,
   onFrame,
   onDead,
-  timeoutMs = 6000,
+  timeoutMs = 15000,
   stunUrls,
   // 完整 ICE 配置(由服务端 GET /ice 下发):[{urls:[...]}, {urls:[turn...],username,credential}]
   // 传了就用它(含 TURN);没传则退化为单个 STUN。
   iceServers,
+  // 可选:注入的 WebRTC 实现(无头 Node 传 werift)。不传用全局。
+  rtcImpl,
 }) {
   const dbg = (s) => {
     try {
@@ -229,8 +246,9 @@ export function openRtcChannel({
     } catch {}
     log && log(s)
   }
-  if (typeof RTCPeerConnection === 'undefined')
-    throw new Error('rtc-unsupported: 当前环境无 RTCPeerConnection')
+  const RTC = resolveRtcImpl(rtcImpl)
+  if (!RTC)
+    throw new Error('rtc-unsupported: 当前环境无 RTCPeerConnection(无头 Node 需注入 werift)')
 
   let pc = null
   let dc = null
@@ -258,14 +276,17 @@ export function openRtcChannel({
     } catch {}
   }
 
-  pc = new RTCPeerConnection({
-    iceServers:
-      Array.isArray(iceServers) && iceServers.length
-        ? iceServers
-        : [{ urls: stunUrls || DEFAULT_STUN }],
+  pc = new RTC.RTCPeerConnection({
+    // 显式传 [] = 只用 host 候选(局域网/测试);不传才退化为默认 STUN。
+    // 不能把 [] 当"没配"再塞公网 STUN —— 运营方没配 STUN 时不该偷偷连外部服务器。
+    iceServers: Array.isArray(iceServers)
+      ? iceServers
+      : [{ urls: stunUrls || DEFAULT_STUN }],
   })
   pc.onicecandidate = (e) => {
-    if (e.candidate) signal.sendTo(room, { t: 'ice', candidate: e.candidate.toJSON() })
+    // 候选可能以对象或"已序列化字典"两种形态到达(浏览器带 toJSON,注入实现不一定)
+    const c = e && e.candidate
+    if (c) signal.sendTo(room, { t: 'ice', candidate: typeof c.toJSON === 'function' ? c.toJSON() : c })
   }
   pc.onconnectionstatechange = () => {
     // 诊断:跨网段打洞常见 "connected → disconnected → failed"(NAT 映射保不住),
@@ -295,9 +316,13 @@ export function openRtcChannel({
     if (!pc) return
     if (m.t === 'sdp') {
       if (isConsumer && m.role === 'answer') {
-        pc.setRemoteDescription(new RTCSessionDescription(m.sdp)).catch((e) => dbg('setRemote failed: ' + e.message))
+        // 传 W3C 字典而不是 new RTCSessionDescription:浏览器与 werift 都接受,
+        // 且省掉对全局 RTCSessionDescription 的依赖(Node 端没有这个类)
+        pc.setRemoteDescription({ type: m.sdp.type || 'answer', sdp: m.sdp.sdp }).catch((e) =>
+          dbg('setRemote failed: ' + e.message)
+        )
       } else if (!isConsumer && m.role === 'offer') {
-        pc.setRemoteDescription(new RTCSessionDescription(m.sdp))
+        pc.setRemoteDescription({ type: m.sdp.type || 'offer', sdp: m.sdp.sdp })
           .then(() => pc.createAnswer())
           .then((answer) => pc.setLocalDescription(answer))
           .then(() => signal.sendTo(room, { t: 'sdp', role: 'answer', sdp: pc.localDescription }))
@@ -306,7 +331,7 @@ export function openRtcChannel({
       return
     }
     if (m.t === 'ice' && m.candidate) {
-      pc.addIceCandidate(new RTCIceCandidate(m.candidate)).catch(() => {})
+      pc.addIceCandidate(m.candidate).catch(() => {})
     }
   }
 

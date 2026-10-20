@@ -8,5 +8,6 @@
   ],
   "heartbeatSec": 30,
   "probeSec": 30,
-  "probeFailThreshold": 2
+  "probeFailThreshold": 2,
+  "rtc": true
 }
