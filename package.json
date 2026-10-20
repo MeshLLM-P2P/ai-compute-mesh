@@ -18,7 +18,8 @@
     "start": "npm run dev",
     "setup": "npm install",
     "turn": "node turn/server.mjs",
-    "turn:selftest": "node turn/selftest.mjs"
+    "turn:selftest": "node turn/selftest.mjs",
+    "turn:nat": "node turn/nat-probe.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.0"
